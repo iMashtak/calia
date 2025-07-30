@@ -1,0 +1,8 @@
+[package]
+name = "calia"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+calia-macro.workspace = true
+cgp.workspace = true

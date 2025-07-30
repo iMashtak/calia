@@ -1,0 +1,16 @@
+[package]
+name = "calia-macro"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+calia-macro-lib.workspace = true
+syn = { version = "2.0.95", features = ["full", "extra-traits"] }
+quote = "1.0.38"
+proc-macro2 = "1.0.92"
+prettyplease = "0.2.27"
+itertools = "0.14.0"
+indexmap = "2"
