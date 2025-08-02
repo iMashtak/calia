@@ -65,8 +65,6 @@ pub fn define_function_call_args_impls(body: TokenStream) -> TokenStream {
             where
                 Context: #(CanBuildExpression<#types>)+*
             {
-                type ArgTypes = Product![#(<Context as CanBuildExpression<#types>>::Type),*];
-
                 fn collect_function_call_args(
                     context: &Context,
                     _code: PhantomData<Product![#(#types),*]>,

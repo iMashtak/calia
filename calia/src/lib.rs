@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
 mod components;
+mod functions;
 mod lang;
 mod operators;
 

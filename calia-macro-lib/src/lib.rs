@@ -783,7 +783,8 @@ pub fn make_dialect(body: TokenStream) -> TokenStream {
                     ExpressionBuilderComponent,
                 ]: #provider,
                 [
-                    OperatorCheckerComponent
+                    OperatorCheckerComponent,
+                    FunctionCheckerComponent,
                 ]: #db<symbol!(#version)>,
             }
         }

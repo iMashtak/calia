@@ -32,7 +32,8 @@ fn main() {
     println!("{}", result);
     let result = MyDialect.build_expression(PhantomData::<SampleExpression>);
     println!("{}", result);
-    let result = MyDialect.build_select(PhantomData::<SelectTemplate<SampleExpression, DummyExpression>>);
+    let result =
+        MyDialect.build_select(PhantomData::<SelectTemplate<SampleExpression, DummyExpression>>);
     println!("{}", result);
 }
 
@@ -131,8 +132,6 @@ where
     Alias: Default + Display,
     Name: Default + Display,
 {
-    type Type = <Table as HasTypedField<Name>>::Type;
-
     fn level(_context: &Context) -> u64 {
         return 0;
     }
@@ -148,11 +147,9 @@ where
 #[cgp_provider]
 impl<Context, Name, Args> ExpressionBuilder<Context, FunctionCallClause<Name, Args>> for PseudoCode
 where
-    Context: CanCollectFunctionCallArgs<Args>,
+    Context: CanCollectFunctionCallArgs<Args> + HasFunction<Name>,
     Name: Default + Display,
 {
-    type Type = ();
-
     fn level(_context: &Context) -> u64 {
         return 0;
     }
@@ -172,8 +169,6 @@ impl<Context, Content> ExpressionBuilder<Context, StringClause<Content>> for Pse
 where
     Content: Default + Display,
 {
-    type Type = ();
-
     fn level(_context: &Context) -> u64 {
         return 0;
     }
@@ -188,8 +183,6 @@ impl<Context, Content> ExpressionBuilder<Context, IntegerClause<Content>> for Ps
 where
     Content: Default + Display,
 {
-    type Type = ();
-
     fn level(_context: &Context) -> u64 {
         return 0;
     }
@@ -205,8 +198,6 @@ impl<Context, Left, Operator, Right>
 where
     Context: CanBuildExpression<Left> + CanBuildExpression<Right> + HasOperator<Operator>,
 {
-    type Type = ();
-
     fn level(_context: &Context) -> u64 {
         return <Context as HasOperator<Operator>>::LEVEL;
     }
@@ -231,7 +222,35 @@ where
     }
 }
 
-define_function_call_args_impls! {32, PseudoCode}
+#[cgp_provider]
+impl<Context> FunctionCallArgsCollector<Context, Nil> for PseudoCode
+where
+    Context:,
+{
+    fn collect_function_call_args(
+        _context: &Context,
+        _code: PhantomData<Nil>,
+        _collection: &mut Vec<String>,
+    ) {
+    }
+}
+
+#[cgp_provider]
+impl<Context, Head, Tail> FunctionCallArgsCollector<Context, Cons<Head, Tail>>
+    for PseudoCode
+where
+    Context: CanBuildExpression<Head>,
+    PseudoCode: FunctionCallArgsCollector<Context, Tail>,
+{
+    fn collect_function_call_args(
+        context: &Context,
+        _code: PhantomData<Cons<Head, Tail>>,
+        collection: &mut Vec<String>,
+    ) {
+        collection.push(context.build_expression(PhantomData::<Head>));
+        PseudoCode::collect_function_call_args(context, PhantomData, collection)
+    }
+}
 
 pub struct PostgreSql<Version>(pub PhantomData<Version>);
 
@@ -279,3 +298,6 @@ impl<Context, Version> OperatorChecker<Context, OrOperatorClause> for PostgreSql
         format!("or")
     }
 }
+
+#[cgp_provider]
+impl<Context, Version> FunctionChecker<Context, symbol!("concat")> for PostgreSql<Version> {}

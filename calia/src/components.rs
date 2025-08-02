@@ -38,8 +38,6 @@ pub trait CanBuildProjection<Code> {
 
 #[cgp_component(ExpressionBuilder)]
 pub trait CanBuildExpression<Code> {
-    type Type;
-
     fn level(&self) -> u64;
 
     fn build_expression(&self, code: PhantomData<Code>) -> String;
@@ -47,7 +45,5 @@ pub trait CanBuildExpression<Code> {
 
 #[cgp_component(FunctionCallArgsCollector)]
 pub trait CanCollectFunctionCallArgs<Code> {
-    type ArgTypes;
-
     fn collect_function_call_args(&self, code: PhantomData<Code>, collection: &mut Vec<String>);
 }
