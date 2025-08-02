@@ -1,33 +1,13 @@
 use std::{fmt::Display, marker::PhantomData};
 
-use calia_macro::{define_function_call_args_impls, define_target_struct_clause_fields_impls};
-use cgp::prelude::*;
 use calia::prelude::*;
+use cgp::prelude::*;
 
-#[cgp_context]
-struct MyDialect;
+dialect! {MyDialect as PseudoCode db PostgreSql version "17.5"}
 
-delegate_components! {
-    MyDialectComponents {
-        [
-            SelectClauseBuilderComponent,
-            TargetClauseBuilderComponent,
-            FromClauseBuilderComponent,
-            WhereClauseBuilderComponent,
-            TargetStructClauseFieldsCollectorComponent,
-            FunctionCallArgsCollectorComponent,
-            ProjectionBuilderComponent,
-            ExpressionBuilderComponent,
-        ]: PseudoCode,
-        [
-            OperatorCheckerComponent
-        ]: PostgreSql,
-    }
-}
+table! {ScopeTable as scope (id, name, age)}
 
-calia_macro::table! {ScopeTable as scope (id, name, age)}
-
-calia_macro::query! {SelectScopes,
+query! {SelectScopes,
     select {
         id: s.id,
         name: concat(s.name, s.name),
@@ -36,8 +16,23 @@ calia_macro::query! {SelectScopes,
     where (s.id and (s.id or 10)) and (((5) or 7))
 }
 
+expression! {SampleExpression [s is ScopeTable] s.age or 5}
+
+query! {SelectTemplate,
+    select {
+        id: s.id,
+        name: concat(s.name, s.name),
+    }
+    from ScopeTable as s
+    where (|Sub| and |Sub2|) and (((5) or 7))
+}
+
 fn main() {
     let result = MyDialect.build_select(PhantomData::<SelectScopes>);
+    println!("{}", result);
+    let result = MyDialect.build_expression(PhantomData::<SampleExpression>);
+    println!("{}", result);
+    let result = MyDialect.build_select(PhantomData::<SelectTemplate<SampleExpression, DummyExpression>>);
     println!("{}", result);
 }
 
@@ -77,12 +72,8 @@ where
 }
 
 #[cgp_provider]
-impl<Context> WhereClauseBuilder<Context, ()> for PseudoCode
-{
-    fn build_where(
-        _context: &Context,
-        _code: PhantomData<()>,
-    ) -> Option<String> {
+impl<Context> WhereClauseBuilder<Context, ()> for PseudoCode {
+    fn build_where(_context: &Context, _code: PhantomData<()>) -> Option<String> {
         None
     }
 }
@@ -242,10 +233,10 @@ where
 
 define_function_call_args_impls! {32, PseudoCode}
 
-pub struct PostgreSql;
+pub struct PostgreSql<Version>(pub PhantomData<Version>);
 
 #[cgp_provider]
-impl<Context> OperatorChecker<Context, LtOperatorClause> for PostgreSql {
+impl<Context, Version> OperatorChecker<Context, LtOperatorClause> for PostgreSql<Version> {
     const LEVEL: u64 = 1;
 
     fn build_operator() -> String {
@@ -254,7 +245,7 @@ impl<Context> OperatorChecker<Context, LtOperatorClause> for PostgreSql {
 }
 
 #[cgp_provider]
-impl<Context> OperatorChecker<Context, GtOperatorClause> for PostgreSql {
+impl<Context, Version> OperatorChecker<Context, GtOperatorClause> for PostgreSql<Version> {
     const LEVEL: u64 = 1;
 
     fn build_operator() -> String {
@@ -263,7 +254,7 @@ impl<Context> OperatorChecker<Context, GtOperatorClause> for PostgreSql {
 }
 
 #[cgp_provider]
-impl<Context> OperatorChecker<Context, EqOperatorClause> for PostgreSql {
+impl<Context, Version> OperatorChecker<Context, EqOperatorClause> for PostgreSql<Version> {
     const LEVEL: u64 = 2;
 
     fn build_operator() -> String {
@@ -272,7 +263,7 @@ impl<Context> OperatorChecker<Context, EqOperatorClause> for PostgreSql {
 }
 
 #[cgp_provider]
-impl<Context> OperatorChecker<Context, AndOperatorClause> for PostgreSql {
+impl<Context, Version> OperatorChecker<Context, AndOperatorClause> for PostgreSql<Version> {
     const LEVEL: u64 = 3;
 
     fn build_operator() -> String {
@@ -281,7 +272,7 @@ impl<Context> OperatorChecker<Context, AndOperatorClause> for PostgreSql {
 }
 
 #[cgp_provider]
-impl<Context> OperatorChecker<Context, OrOperatorClause> for PostgreSql {
+impl<Context, Version> OperatorChecker<Context, OrOperatorClause> for PostgreSql<Version> {
     const LEVEL: u64 = 4;
 
     fn build_operator() -> String {

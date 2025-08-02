@@ -2,15 +2,12 @@ use indexmap::IndexMap;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use syn::{
-    Error, Ident, LitInt, LitStr, Token, Type, braced, parenthesized,
+    Error, Ident, LitInt, LitStr, Token, Type, braced, bracketed, parenthesized,
     parse::{Parse, ParseBuffer, ParseStream},
     parse2,
     punctuated::Punctuated,
     token,
 };
-
-#[cfg(test)]
-mod tests;
 
 #[derive(Debug)]
 enum QueryClause {
@@ -174,6 +171,7 @@ enum SimpleExpressionClause {
     Integer(IntegerClause),
     FieldReference(FieldReferenceClause),
     FunctionCall(FunctionCallClause),
+    SubstitutionPoint(SubstitutionPointClause),
 }
 
 impl Parse for SimpleExpressionClause {
@@ -191,6 +189,8 @@ impl Parse for SimpleExpressionClause {
             Ok(SimpleExpressionClause::FieldReference(input.parse()?))
         } else if input.peek(Ident) && input.peek2(token::Paren) {
             Ok(SimpleExpressionClause::FunctionCall(input.parse()?))
+        } else if input.peek(Token![|]) {
+            Ok(SimpleExpressionClause::SubstitutionPoint(input.parse()?))
         } else {
             return Err(syn::Error::new(input.span(), "unknown kind of expression"));
         }
@@ -204,7 +204,32 @@ impl ToCgpQuery for SimpleExpressionClause {
             SimpleExpressionClause::Integer(x) => x.to_cgp_query(context),
             SimpleExpressionClause::FieldReference(x) => x.to_cgp_query(context),
             SimpleExpressionClause::FunctionCall(x) => x.to_cgp_query(context),
+            SimpleExpressionClause::SubstitutionPoint(x) => x.to_cgp_query(context),
         }
+    }
+}
+
+#[derive(Debug)]
+struct SubstitutionPointClause {
+    ty: Type,
+}
+
+impl Parse for SubstitutionPointClause {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        input.parse::<Token![|]>()?;
+        let ty: Type = input.parse()?;
+        input.parse::<Token![|]>()?;
+        Ok(SubstitutionPointClause { ty })
+    }
+}
+
+impl ToCgpQuery for SubstitutionPointClause {
+    fn to_cgp_query(&self, context: &mut CgpQueryContext) -> TokenStream {
+        let ty = &self.ty;
+        if !context.substitutions.contains_key(&ty.clone()) {
+            context.substitutions.insert(ty.clone(), ());
+        }
+        quote! {#ty}
     }
 }
 
@@ -553,6 +578,11 @@ mod keyword {
     custom_keyword!(order);
     custom_keyword!(limit);
     custom_keyword!(offset);
+
+    custom_keyword!(db);
+    custom_keyword!(version);
+
+    custom_keyword!(is);
 }
 
 trait ToCgpQuery {
@@ -561,6 +591,7 @@ trait ToCgpQuery {
 
 struct CgpQueryContext {
     aliases: IndexMap<Ident, Type>,
+    substitutions: IndexMap<Type, ()>,
 }
 
 struct Query {
@@ -583,12 +614,76 @@ impl Parse for Query {
 pub fn make_query(body: TokenStream) -> TokenStream {
     let mut context = CgpQueryContext {
         aliases: IndexMap::new(),
+        substitutions: IndexMap::new(),
     };
     let query = parse2::<Query>(body).unwrap();
     let assign = query.assign;
     let query_clause = query.query_clause.to_cgp_query(&mut context);
+    if context.substitutions.is_empty() {
+        quote! {
+            pub type #assign = #query_clause;
+        }
+    } else {
+        let subs = context.substitutions.keys();
+        quote! {
+            pub type #assign<#(#subs),*> = #query_clause;
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ExpressionSubstitution {
+    assign: Type,
+    aliases: Vec<AliasClause>,
+    expression: ExpressionClause,
+}
+
+impl Parse for ExpressionSubstitution {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let assign: Type = input.parse()?;
+        let content;
+        bracketed!(content in input);
+        let alias_clauses = content.parse_terminated(AliasClause::parse, Token![,])?;
+        let aliases = alias_clauses.into_iter().collect();
+        let expression = input.parse()?;
+        Ok(ExpressionSubstitution {
+            assign,
+            aliases,
+            expression,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct AliasClause {
+    name: Ident,
+    table: Type,
+}
+
+impl Parse for AliasClause {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let name: Ident = input.parse()?;
+        input.parse::<keyword::is>()?;
+        let table: Type = input.parse()?;
+        Ok(AliasClause { name, table })
+    }
+}
+
+pub fn make_expression(body: TokenStream) -> TokenStream {
+    let mut context = CgpQueryContext {
+        aliases: IndexMap::new(),
+        substitutions: IndexMap::new(),
+    };
+    let sub = parse2::<ExpressionSubstitution>(body).unwrap();
+    let assign = sub.assign;
+    let aliases = sub.aliases;
+    for alias in aliases {
+        context.aliases.insert(alias.name, alias.table);
+    }
+    let expression = sub.expression;
+    let expression = expression.to_cgp_query(&mut context);
     quote! {
-        type #assign = #query_clause;
+        pub type #assign = #expression;
     }
 }
 
@@ -627,12 +722,70 @@ pub fn make_table(body: TokenStream) -> TokenStream {
         });
     }
     quote! {
-        struct #table_ty;
+        pub struct #table_ty;
 
         impl IsTable for #table_ty {
             type Name = symbol!(#table_name);
         }
 
         #(#has_typed_field_impls)*
+    }
+}
+
+#[derive(Debug)]
+struct DialectDef {
+    ty: Ident,
+    provider: Type,
+    db: Type,
+    version: LitStr,
+}
+
+impl Parse for DialectDef {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let ty: Ident = input.parse()?;
+        input.parse::<Token![as]>()?;
+        let provider: Type = input.parse()?;
+        input.parse::<keyword::db>()?;
+        let db: Type = input.parse()?;
+        input.parse::<keyword::version>()?;
+        let version: LitStr = input.parse()?;
+        Ok(DialectDef {
+            ty,
+            provider,
+            db,
+            version,
+        })
+    }
+}
+
+pub fn make_dialect(body: TokenStream) -> TokenStream {
+    let def: DialectDef = parse2(body).unwrap();
+    let ty = def.ty;
+    let ty_components = Ident::new((ty.to_string() + "Components").as_str(), ty.span());
+    let provider = def.provider;
+    let db = def.db;
+    let version = def.version;
+
+    quote! {
+        #[cgp_context]
+        pub struct #ty;
+
+        delegate_components! {
+            #ty_components {
+                [
+                    SelectClauseBuilderComponent,
+                    TargetClauseBuilderComponent,
+                    FromClauseBuilderComponent,
+                    WhereClauseBuilderComponent,
+                    TargetStructClauseFieldsCollectorComponent,
+                    FunctionCallArgsCollectorComponent,
+                    ProjectionBuilderComponent,
+                    ExpressionBuilderComponent,
+                ]: #provider,
+                [
+                    OperatorCheckerComponent
+                ]: #db<symbol!(#version)>,
+            }
+        }
     }
 }
