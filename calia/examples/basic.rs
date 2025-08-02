@@ -2,6 +2,7 @@ use std::{fmt::Display, marker::PhantomData};
 
 use calia_macro::{define_function_call_args_impls, define_target_struct_clause_fields_impls};
 use cgp::prelude::*;
+use calia::prelude::*;
 
 #[cgp_context]
 struct MyDialect;
@@ -12,11 +13,15 @@ delegate_components! {
             SelectClauseBuilderComponent,
             TargetClauseBuilderComponent,
             FromClauseBuilderComponent,
+            WhereClauseBuilderComponent,
             TargetStructClauseFieldsCollectorComponent,
             FunctionCallArgsCollectorComponent,
             ProjectionBuilderComponent,
             ExpressionBuilderComponent,
         ]: PseudoCode,
+        [
+            OperatorCheckerComponent
+        ]: PostgreSql,
     }
 }
 
@@ -28,7 +33,7 @@ calia_macro::query! {SelectScopes,
         name: concat(s.name, s.name),
     }
     from ScopeTable as s
-    where s.name "=" "115" and s.age "<" 115
+    where (s.id and (s.id or 10)) and (((5) or 7))
 }
 
 fn main() {
@@ -36,28 +41,13 @@ fn main() {
     println!("{}", result);
 }
 
-trait IsTable {
-    type Name: Default + Display;
-}
-
-trait HasTypedField<Name> {
-    type Type;
-}
-
 pub struct PseudoCode;
-
-struct SelectClause<Target, From, Where = ()>(pub PhantomData<(Target, From, Where)>);
-
-#[cgp_component(SelectClauseBuilder)]
-trait CanBuildSelect<Code> {
-    fn build_select(&self, code: PhantomData<Code>) -> String;
-}
 
 #[cgp_provider]
 impl<Context, Target, From, Where> SelectClauseBuilder<Context, SelectClause<Target, From, Where>>
     for PseudoCode
 where
-    Context: CanBuildTargetClause<Target> + CanBuildFromClause<From> + CanBuildExpression<Where>,
+    Context: CanBuildTargetClause<Target> + CanBuildFromClause<From> + CanBuildWhereClause<Where>,
 {
     fn build_select(
         context: &Context,
@@ -65,7 +55,7 @@ where
     ) -> String {
         let target_clause = context.build_target(PhantomData);
         let from_clause = context.build_from(PhantomData);
-        let where_clause = context.build_expression(PhantomData);
+        let where_clause = context.build_where(PhantomData);
         let mut result = String::new();
         result.push_str(format!("select {} from {}", target_clause, from_clause).as_str());
         if let Some(where_clause) = where_clause {
@@ -73,13 +63,6 @@ where
         }
         result
     }
-}
-
-struct FromClause<Table, Alias>(pub PhantomData<(Table, Alias)>);
-
-#[cgp_component(FromClauseBuilder)]
-trait CanBuildFromClause<Code> {
-    fn build_from(&self, code: PhantomData<Code>) -> String;
 }
 
 #[cgp_provider]
@@ -93,14 +76,30 @@ where
     }
 }
 
-struct FieldReferenceClause<Table, Alias, Name>(pub PhantomData<(Table, Alias, Name)>);
-
-#[cgp_component(TargetClauseBuilder)]
-trait CanBuildTargetClause<Code> {
-    fn build_target(&self, code: PhantomData<Code>) -> String;
+#[cgp_provider]
+impl<Context> WhereClauseBuilder<Context, ()> for PseudoCode
+{
+    fn build_where(
+        _context: &Context,
+        _code: PhantomData<()>,
+    ) -> Option<String> {
+        None
+    }
 }
 
-struct TargetStructClause<Fields>(pub PhantomData<Fields>);
+#[cgp_provider]
+impl<Context, Expression> WhereClauseBuilder<Context, WhereClause<Expression>> for PseudoCode
+where
+    Context: CanBuildExpression<Expression>,
+{
+    fn build_where(
+        context: &Context,
+        _code: PhantomData<WhereClause<Expression>>,
+    ) -> Option<String> {
+        let expression = context.build_expression(PhantomData);
+        Some(expression)
+    }
+}
 
 #[cgp_provider]
 impl<Context, Fields> TargetClauseBuilder<Context, TargetStructClause<Fields>> for PseudoCode
@@ -114,23 +113,7 @@ where
     }
 }
 
-#[cgp_component(TargetStructClauseFieldsCollector)]
-trait CanCollectTargetStructClauseFields<Code> {
-    fn collect_target_struct_clause_fields(
-        &self,
-        code: PhantomData<Code>,
-        collection: &mut Vec<String>,
-    );
-}
-
 define_target_struct_clause_fields_impls! {32, PseudoCode}
-
-#[cgp_component(ProjectionBuilder)]
-trait CanBuildProjection<Code> {
-    fn build_projection(&self, code: PhantomData<Code>) -> String;
-}
-
-struct TargetStructFieldClause<Name, Expression>(pub PhantomData<(Name, Expression)>);
 
 #[cgp_provider]
 impl<Context, Name, Expression>
@@ -149,14 +132,6 @@ where
     }
 }
 
-#[cgp_component(ExpressionBuilder)]
-trait CanBuildExpression<Code> {
-    type Type;
-    const LEVEL: u64;
-
-    fn build_expression(&self, code: PhantomData<Code>) -> String;
-}
-
 #[cgp_provider]
 impl<Context, Table, Alias, Name>
     ExpressionBuilder<Context, FieldReferenceClause<Table, Alias, Name>> for PseudoCode
@@ -166,7 +141,10 @@ where
     Name: Default + Display,
 {
     type Type = <Table as HasTypedField<Name>>::Type;
-    const LEVEL: u64 = 0;
+
+    fn level(_context: &Context) -> u64 {
+        return 0;
+    }
 
     fn build_expression(
         _context: &Context,
@@ -176,8 +154,6 @@ where
     }
 }
 
-struct FunctionCallClause<Name, Args>(pub PhantomData<(Name, Args)>);
-
 #[cgp_provider]
 impl<Context, Name, Args> ExpressionBuilder<Context, FunctionCallClause<Name, Args>> for PseudoCode
 where
@@ -185,7 +161,10 @@ where
     Name: Default + Display,
 {
     type Type = ();
-    const LEVEL: u64 = 0;
+
+    fn level(_context: &Context) -> u64 {
+        return 0;
+    }
 
     fn build_expression(
         context: &Context,
@@ -197,22 +176,21 @@ where
     }
 }
 
-struct StringClause<Content>(pub PhantomData<Content>);
-
 #[cgp_provider]
 impl<Context, Content> ExpressionBuilder<Context, StringClause<Content>> for PseudoCode
 where
     Content: Default + Display,
 {
     type Type = ();
-    const LEVEL: u64 = 0;
+
+    fn level(_context: &Context) -> u64 {
+        return 0;
+    }
 
     fn build_expression(_context: &Context, _code: PhantomData<StringClause<Content>>) -> String {
         format!("\"{}\"", Content::default())
     }
 }
-
-struct IntegerClause<Content>(pub PhantomData<Content>);
 
 #[cgp_provider]
 impl<Context, Content> ExpressionBuilder<Context, IntegerClause<Content>> for PseudoCode
@@ -220,71 +198,93 @@ where
     Content: Default + Display,
 {
     type Type = ();
-    const LEVEL: u64 = 0;
+
+    fn level(_context: &Context) -> u64 {
+        return 0;
+    }
 
     fn build_expression(_context: &Context, _code: PhantomData<IntegerClause<Content>>) -> String {
         format!("{}", Content::default())
     }
 }
 
-struct BinaryOperatorCallClause<Left, Operator, Right>(pub PhantomData<(Left, Operator, Right)>);
-
 #[cgp_provider]
 impl<Context, Left, Operator, Right>
     ExpressionBuilder<Context, BinaryOperatorCallClause<Left, Operator, Right>> for PseudoCode
 where
     Context: CanBuildExpression<Left> + CanBuildExpression<Right> + HasOperator<Operator>,
-    Operator: Default + Display,
 {
     type Type = ();
-    const LEVEL: u64 = 0;
+
+    fn level(_context: &Context) -> u64 {
+        return <Context as HasOperator<Operator>>::LEVEL;
+    }
 
     fn build_expression(
         context: &Context,
         _code: PhantomData<BinaryOperatorCallClause<Left, Operator, Right>>,
     ) -> String {
-        let left_level = <Context as CanBuildExpression<Left>>::LEVEL;
-        let right_level = <Context as CanBuildExpression<Right>>::LEVEL;
+        let left_level = <Context as CanBuildExpression<Left>>::level(context);
+        let right_level = <Context as CanBuildExpression<Right>>::level(context);
         let operator_level = <Context as HasOperator<Operator>>::LEVEL;
         let mut left = context.build_expression(PhantomData::<Left>);
         let mut right = context.build_expression(PhantomData::<Right>);
-        let operator = Operator::default().to_string();
-        if left_level < operator_level {
+        let operator = <Context as HasOperator<Operator>>::build_operator();
+        if left_level > operator_level {
             left = format!("({})", left);
         }
-        if right_level < operator_level {
+        if right_level > operator_level {
             right = format!("({})", right);
         }
         format!("{} {} {}", left, operator, right)
     }
 }
 
-#[cgp_component(OperatorChecker)]
-trait HasOperator<Content> {
-    const LEVEL: u64;
+define_function_call_args_impls! {32, PseudoCode}
+
+pub struct PostgreSql;
+
+#[cgp_provider]
+impl<Context> OperatorChecker<Context, LtOperatorClause> for PostgreSql {
+    const LEVEL: u64 = 1;
+
+    fn build_operator() -> String {
+        format!("<")
+    }
 }
 
-struct AndOperatorClause;
+#[cgp_provider]
+impl<Context> OperatorChecker<Context, GtOperatorClause> for PostgreSql {
+    const LEVEL: u64 = 1;
 
-struct OrOperatorClause;
+    fn build_operator() -> String {
+        format!(">")
+    }
+}
 
-struct PostgreSql;
+#[cgp_provider]
+impl<Context> OperatorChecker<Context, EqOperatorClause> for PostgreSql {
+    const LEVEL: u64 = 2;
+
+    fn build_operator() -> String {
+        format!("=")
+    }
+}
 
 #[cgp_provider]
 impl<Context> OperatorChecker<Context, AndOperatorClause> for PostgreSql {
-    const LEVEL: u64 = 1;
+    const LEVEL: u64 = 3;
+
+    fn build_operator() -> String {
+        format!("and")
+    }
 }
 
 #[cgp_provider]
 impl<Context> OperatorChecker<Context, OrOperatorClause> for PostgreSql {
-    const LEVEL: u64 = 2;
+    const LEVEL: u64 = 4;
+
+    fn build_operator() -> String {
+        format!("or")
+    }
 }
-
-#[cgp_component(FunctionCallArgsCollector)]
-trait CanCollectFunctionCallArgs<Code> {
-    type ArgTypes;
-
-    fn collect_function_call_args(&self, code: PhantomData<Code>, collection: &mut Vec<String>);
-}
-
-define_function_call_args_impls! {32, PseudoCode}

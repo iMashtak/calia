@@ -1,8 +1,8 @@
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::{
-    Ident, LitInt, LitStr, Token, Type, braced, parenthesized,
+    Error, Ident, LitInt, LitStr, Token, Type, braced, parenthesized,
     parse::{Parse, ParseBuffer, ParseStream},
     parse2,
     punctuated::Punctuated,
@@ -40,7 +40,7 @@ impl ToCgpQuery for QueryClause {
 struct SelectClause {
     target_clause: SelectTargetClause,
     from_clause: SelectFromClause,
-    where_clause: Option<SelectWhereClause>,
+    where_clause: Option<ExpressionClause>,
 }
 
 impl Parse for SelectClause {
@@ -48,10 +48,29 @@ impl Parse for SelectClause {
         let target_clause: SelectTargetClause = input.parse()?;
         input.parse::<keyword::from>()?;
         let from_clause: SelectFromClause = input.parse()?;
-        let mut where_clause: Option<SelectWhereClause> = Option::None;
+        let mut where_clause: Option<ExpressionClause> = Option::None;
         if input.peek(Token![where]) {
             input.parse::<Token![where]>()?;
-            where_clause = Some(input.parse()?);
+            let mut where_expression = Vec::new();
+            while !input.is_empty() {
+                if input.peek(keyword::group)
+                    || input.peek(keyword::order)
+                    || input.peek(keyword::limit)
+                    || input.peek(keyword::offset)
+                {
+                    break;
+                }
+                input.step(|cursor| {
+                    let (token, next) = cursor
+                        .token_tree()
+                        .ok_or_else(|| input.error("Unexpected end of input"))?;
+                    where_expression.push(token.into_token_stream());
+                    Ok(((), next))
+                })?;
+            }
+            let where_expression: TokenStream = where_expression.into_iter().collect();
+            let where_expression: ExpressionClause = parse2(where_expression)?;
+            where_clause = Some(where_expression);
         }
         Ok(SelectClause {
             target_clause,
@@ -66,7 +85,10 @@ impl ToCgpQuery for SelectClause {
         let from_tokens: TokenStream = self.from_clause.to_cgp_query(context);
         let target_tokens: TokenStream = self.target_clause.to_cgp_query(context);
         let where_tokens: TokenStream = match &self.where_clause {
-            Some(x) => x.to_cgp_query(context),
+            Some(x) => {
+                let expression = x.to_cgp_query(context);
+                quote! {WhereClause<#expression>}
+            }
             None => quote! {()},
         };
         quote! {
@@ -107,8 +129,7 @@ impl Parse for SelectTargetStructClause {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let content;
         braced!(content in input);
-        let pairs: Punctuated<SelectTargetStructPairClause, token::Comma> =
-            Punctuated::parse_terminated(&content)?;
+        let pairs = content.parse_terminated(SelectTargetStructPairClause::parse, token::Comma)?;
         let mut mapping: IndexMap<Ident, ExpressionClause> = IndexMap::new();
         for pair in pairs {
             mapping.insert(pair.name, pair.expression);
@@ -148,36 +169,243 @@ impl Parse for SelectTargetStructPairClause {
 }
 
 #[derive(Debug)]
-enum ExpressionClause {
+enum SimpleExpressionClause {
     String(StringClause),
     Integer(IntegerClause),
     FieldReference(FieldReferenceClause),
     FunctionCall(FunctionCallClause),
 }
 
+impl Parse for SimpleExpressionClause {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.peek(token::Paren) {
+            let inner;
+            parenthesized!(inner in input);
+            return inner.parse();
+        }
+        if input.peek(LitStr) {
+            Ok(SimpleExpressionClause::String(input.parse()?))
+        } else if input.peek(LitInt) {
+            Ok(SimpleExpressionClause::Integer(input.parse()?))
+        } else if input.peek(Ident) && input.peek2(Token![.]) {
+            Ok(SimpleExpressionClause::FieldReference(input.parse()?))
+        } else if input.peek(Ident) && input.peek2(token::Paren) {
+            Ok(SimpleExpressionClause::FunctionCall(input.parse()?))
+        } else {
+            return Err(syn::Error::new(input.span(), "unknown kind of expression"));
+        }
+    }
+}
+
+impl ToCgpQuery for SimpleExpressionClause {
+    fn to_cgp_query(&self, context: &mut CgpQueryContext) -> TokenStream {
+        match self {
+            SimpleExpressionClause::String(x) => x.to_cgp_query(context),
+            SimpleExpressionClause::Integer(x) => x.to_cgp_query(context),
+            SimpleExpressionClause::FieldReference(x) => x.to_cgp_query(context),
+            SimpleExpressionClause::FunctionCall(x) => x.to_cgp_query(context),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum ExpressionClause {
+    SimpleExpression(SimpleExpressionClause),
+    BinaryOperatorCall(BinaryOperatorCallClause),
+}
+
 impl Parse for ExpressionClause {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.peek(LitStr) {
-            Ok(ExpressionClause::String(input.parse()?))
-        } else if input.peek(LitInt) {
-            Ok(ExpressionClause::Integer(input.parse()?))
-        } else if input.peek(Ident) && input.peek2(Token![.]) {
-            Ok(ExpressionClause::FieldReference(input.parse()?))
-        } else if input.peek(Ident) && input.peek2(token::Paren) {
-            Ok(ExpressionClause::FunctionCall(input.parse()?))
-        } else {
-            Err(input.error("Invalid expression"))
+        fn peek_and_parse_binary_operator(content: &ParseBuffer) -> Option<TokenStream> {
+            if content.peek(keyword::and) {
+                let operator = Some(quote! {AndOperatorClause});
+                content.parse::<keyword::and>().unwrap();
+                return operator;
+            }
+            if content.peek(keyword::or) {
+                let operator = Some(quote! {OrOperatorClause});
+                content.parse::<keyword::or>().unwrap();
+                return operator;
+            }
+            if content.peek(token::Lt) {
+                let operator = Some(quote! {LtOperatorClause});
+                content.parse::<token::Lt>().unwrap();
+                return operator;
+            }
+            if content.peek(token::Gt) {
+                let operator = Some(quote! {GtOperatorClause});
+                content.parse::<token::Gt>().unwrap();
+                return operator;
+            }
+            if content.peek(token::Eq) {
+                let operator = Some(quote! {EqOperatorClause});
+                content.parse::<token::Eq>().unwrap();
+                return operator;
+            }
+            None
         }
+
+        fn parse_inner(content: &ParseBuffer) -> syn::Result<ExpressionClause> {
+            if content.peek(token::Paren) {
+                let inner;
+                parenthesized!(inner in content);
+                let left = parse_inner(&inner)?;
+                if content.is_empty() {
+                    return Ok(left);
+                }
+                if let Some(operator) = peek_and_parse_binary_operator(content) {
+                    let right: ExpressionClause = content.parse()?;
+                    return Ok(ExpressionClause::BinaryOperatorCall(
+                        BinaryOperatorCallClause {
+                            left: Box::new(left),
+                            operator,
+                            right: Box::new(right),
+                        },
+                    ));
+                }
+                return Err(syn::Error::new(content.span(), "expected operator"));
+            } else {
+                let mut left = Vec::new();
+                let mut operator = None;
+                while !content.is_empty() {
+                    if content.peek(Token![,]) {
+                        break;
+                    }
+                    if let Some(op) = peek_and_parse_binary_operator(content) {
+                        operator = Some(op);
+                        break;
+                    }
+                    content.step(|cursor| {
+                        let (token, next) = cursor
+                            .token_tree()
+                            .ok_or_else(|| content.error("Unexpected end of input"))?;
+                        left.push(token.into_token_stream());
+                        Ok(((), next))
+                    })?;
+                }
+                let left: TokenStream = left.into_iter().collect();
+                let left: SimpleExpressionClause = parse2(left)?;
+                let left = ExpressionClause::SimpleExpression(left);
+                if operator.is_none() {
+                    return Ok(left);
+                }
+                let operator = operator.unwrap();
+                let right: ExpressionClause = content.parse()?;
+                return Ok(ExpressionClause::BinaryOperatorCall(
+                    BinaryOperatorCallClause {
+                        left: Box::new(left),
+                        operator,
+                        right: Box::new(right),
+                    },
+                ));
+            };
+        }
+
+        parse_inner(input)
     }
 }
 
 impl ToCgpQuery for ExpressionClause {
     fn to_cgp_query(&self, context: &mut CgpQueryContext) -> TokenStream {
         match self {
-            ExpressionClause::String(x) => x.to_cgp_query(context),
-            ExpressionClause::Integer(x) => x.to_cgp_query(context),
-            ExpressionClause::FieldReference(x) => x.to_cgp_query(context),
-            ExpressionClause::FunctionCall(x) => x.to_cgp_query(context),
+            ExpressionClause::SimpleExpression(x) => x.to_cgp_query(context),
+            ExpressionClause::BinaryOperatorCall(x) => x.to_cgp_query(context),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct BinaryOperatorCallClause {
+    left: Box<ExpressionClause>,
+    operator: TokenStream,
+    right: Box<ExpressionClause>,
+}
+
+impl Parse for BinaryOperatorCallClause {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.peek(token::Paren) {
+            let content;
+            parenthesized!(content in input);
+            let left: ExpressionClause = content.parse()?;
+            let operator = if content.peek(keyword::and) {
+                quote! {AndOperatorClause}
+            } else if content.peek(keyword::or) {
+                quote! {OrOperatorClause}
+            } else if content.peek(token::Lt) {
+                quote! {LtOperatorClause}
+            } else if content.peek(token::Gt) {
+                quote! {GtOperatorClause}
+            } else if content.peek(token::Eq) {
+                quote! {EqOperatorClause}
+            } else {
+                return Err(Error::new(content.span(), "unknown operator"));
+            };
+            let right: ExpressionClause = input.parse()?;
+            return Ok(BinaryOperatorCallClause {
+                left: Box::new(left),
+                operator,
+                right: Box::new(right),
+            });
+        } else {
+            let mut left = Vec::new();
+            let operator: Option<TokenStream>;
+            loop {
+                if input.peek(keyword::and) {
+                    operator = Some(quote! {AndOperatorClause});
+                    input.parse::<keyword::and>()?;
+                    break;
+                }
+                if input.peek(keyword::or) {
+                    operator = Some(quote! {OrOperatorClause});
+                    input.parse::<keyword::or>()?;
+                    break;
+                }
+                if input.peek(token::Lt) {
+                    operator = Some(quote! {LtOperatorClause});
+                    input.parse::<token::Lt>()?;
+                    break;
+                }
+                if input.peek(token::Gt) {
+                    operator = Some(quote! {GtOperatorClause});
+                    input.parse::<token::Gt>()?;
+                    break;
+                }
+                if input.peek(token::Eq) {
+                    operator = Some(quote! {EqOperatorClause});
+                    input.parse::<token::Eq>()?;
+                    break;
+                }
+                input.step(|cursor| {
+                    let (token, next) = cursor
+                        .token_tree()
+                        .ok_or_else(|| input.error("Unexpected end of input"))?;
+                    left.push(token.into_token_stream());
+                    Ok(((), next))
+                })?;
+            }
+            if operator.is_none() {
+                return Err(syn::Error::new(input.span(), "Not found operator"));
+            }
+            let left: TokenStream = left.into_iter().collect();
+            let left: ExpressionClause = parse2(left)
+                .map_err(|x| syn::Error::new(x.span(), format!("Cannot parse left: {}", x)))?;
+            let right: ExpressionClause = input.parse()?;
+            return Ok(BinaryOperatorCallClause {
+                left: Box::new(left),
+                operator: operator.unwrap(),
+                right: Box::new(right),
+            });
+        }
+    }
+}
+
+impl ToCgpQuery for BinaryOperatorCallClause {
+    fn to_cgp_query(&self, context: &mut CgpQueryContext) -> TokenStream {
+        let left = self.left.as_ref().to_cgp_query(context);
+        let operator = &self.operator;
+        let right = self.right.as_ref().to_cgp_query(context);
+        quote! {
+            BinaryOperatorCallClause<#left, #operator, #right>
         }
     }
 }
@@ -310,186 +538,6 @@ impl ToCgpQuery for SelectFromClause {
         let alias = LitStr::new(self.alias.to_string().as_str(), self.alias.span());
         quote! {
             FromClause<#table, symbol!(#alias)>
-        }
-    }
-}
-
-#[derive(Debug)]
-enum SelectWhereClause {
-    Raw(SelectWhereRawClause),
-    And(SelectWhereAndClause),
-    Or(SelectWhereOrClause),
-}
-
-fn parse_where_content<'a>(input: &ParseBuffer<'a>) -> syn::Result<ParseBuffer<'a>> {
-    let start = input.fork();
-    while !input.is_empty() {
-        if input.peek(keyword::group) || input.peek(keyword::order) {
-            break;
-        }
-        input.step(|cursor| {
-            let (_token, next) = cursor
-                .token_tree()
-                .ok_or_else(|| input.error("Unexpected end of input"))?;
-            Ok(((), next))
-        })?;
-    }
-    Ok(start)
-}
-
-enum WhereOperator {
-    And,
-    Or,
-    None,
-}
-
-fn parse_where_item_content<'a>(
-    input: &ParseBuffer<'a>,
-) -> syn::Result<(ParseBuffer<'a>, WhereOperator)> {
-    let start = input.fork();
-    let mut operator = WhereOperator::None;
-    while !input.is_empty() {
-        if input.peek(keyword::and) {
-            operator = WhereOperator::And;
-            break;
-        }
-        if input.peek(keyword::or) {
-            operator = WhereOperator::Or;
-            break;
-        }
-        if input.peek(keyword::group) || input.peek(keyword::order) {
-            break;
-        }
-        input.step(|cursor| {
-            let (_token, next) = cursor
-                .token_tree()
-                .ok_or_else(|| input.error("Unexpected end of input"))?;
-            Ok(((), next))
-        })?;
-    }
-    Ok((start, operator))
-}
-
-fn parse_where_clause_rec<'a>(input: &ParseBuffer<'a>) -> syn::Result<SelectWhereClause> {
-    if input.peek(token::Paren) {
-        let content;
-        parenthesized!(content in input);
-        let left_where_clause = parse_where_clause_rec(&content)?;
-        if input.peek(keyword::and) {
-            input.parse::<keyword::and>()?;
-            let right_where_clause = parse_where_clause_rec(input)?;
-            Ok(SelectWhereClause::And(SelectWhereAndClause {
-                left: Box::new(left_where_clause),
-                right: Box::new(right_where_clause),
-            }))
-        } else if input.peek(keyword::or) {
-            input.parse::<keyword::or>()?;
-            let right_where_clause = parse_where_clause_rec(input)?;
-            Ok(SelectWhereClause::Or(SelectWhereOrClause {
-                left: Box::new(left_where_clause),
-                right: Box::new(right_where_clause),
-            }))
-        } else {
-            Ok(left_where_clause)
-        }
-    } else {
-        let (content, operator) = parse_where_item_content(input)?;
-        match operator {
-            WhereOperator::And => {
-                let left = SelectWhereRawClause::parse(&content)?;
-                content.parse::<keyword::and>()?;
-                let right = parse_where_clause_rec(&content)?;
-                Ok(SelectWhereClause::And(SelectWhereAndClause {
-                    left: Box::new(SelectWhereClause::Raw(left)),
-                    right: Box::new(right),
-                }))
-            }
-            WhereOperator::Or => {
-                let left = SelectWhereRawClause::parse(&content)?;
-                content.parse::<keyword::or>()?;
-                let right = parse_where_clause_rec(&content)?;
-                Ok(SelectWhereClause::Or(SelectWhereOrClause {
-                    left: Box::new(SelectWhereClause::Raw(left)),
-                    right: Box::new(right),
-                }))
-            }
-            WhereOperator::None => Ok(SelectWhereClause::Raw(content.parse()?)),
-        }
-    }
-}
-
-impl Parse for SelectWhereClause {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let content = parse_where_content(input)?;
-        parse_where_clause_rec(&content)
-    }
-}
-
-impl ToCgpQuery for SelectWhereClause {
-    fn to_cgp_query(&self, context: &mut CgpQueryContext) -> TokenStream {
-        match self {
-            SelectWhereClause::Raw(x) => x.to_cgp_query(context),
-            SelectWhereClause::And(x) => x.to_cgp_query(context),
-            SelectWhereClause::Or(x) => x.to_cgp_query(context),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct SelectWhereRawClause {
-    var: ExpressionClause,
-    operator: LitStr,
-    val: ExpressionClause,
-}
-
-impl Parse for SelectWhereRawClause {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let var: ExpressionClause = input.parse()?;
-        let operator: LitStr = input.parse()?;
-        let val: ExpressionClause = input.parse()?;
-        Ok(SelectWhereRawClause { var, operator, val })
-    }
-}
-
-impl ToCgpQuery for SelectWhereRawClause {
-    fn to_cgp_query(&self, context: &mut CgpQueryContext) -> TokenStream {
-        let var = self.var.to_cgp_query(context);
-        let operator = &self.operator;
-        let val = self.val.to_cgp_query(context);
-        quote! {
-            RawWhereClause<#var, symbol!(#operator), #val>
-        }
-    }
-}
-
-#[derive(Debug)]
-struct SelectWhereAndClause {
-    left: Box<SelectWhereClause>,
-    right: Box<SelectWhereClause>,
-}
-
-impl ToCgpQuery for SelectWhereAndClause {
-    fn to_cgp_query(&self, context: &mut CgpQueryContext) -> TokenStream {
-        let left = self.left.to_cgp_query(context);
-        let right = self.right.to_cgp_query(context);
-        quote! {
-            AndWhereClause<#left, #right>
-        }
-    }
-}
-
-#[derive(Debug)]
-struct SelectWhereOrClause {
-    left: Box<SelectWhereClause>,
-    right: Box<SelectWhereClause>,
-}
-
-impl ToCgpQuery for SelectWhereOrClause {
-    fn to_cgp_query(&self, context: &mut CgpQueryContext) -> TokenStream {
-        let left = self.left.to_cgp_query(context);
-        let right = self.right.to_cgp_query(context);
-        quote! {
-            OrWhereClause<#left, #right>
         }
     }
 }
