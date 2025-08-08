@@ -7,4 +7,6 @@ pub use calia_macro::*;
 
 use cgp::prelude::*;
 
-expression!{DummyExpression [] 1 = 1}
+expression!{TrueExpression [] 1 = 1}
+
+expression!{FalseExpression [] 1 < 1}

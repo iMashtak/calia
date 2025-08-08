@@ -33,7 +33,7 @@ fn main() {
     let result = MyDialect.build_expression(PhantomData::<SampleExpression>);
     println!("{}", result);
     let result =
-        MyDialect.build_select(PhantomData::<SelectTemplate<SampleExpression, DummyExpression>>);
+        MyDialect.build_select(PhantomData::<SelectTemplate<SampleExpression, TrueExpression>>);
     println!("{}", result);
 }
 
