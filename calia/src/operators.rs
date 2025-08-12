@@ -2,7 +2,7 @@ use cgp::prelude::*;
 
 #[cgp_component(OperatorChecker)]
 pub trait HasOperator<Content> {
-    const LEVEL: u64;
+    const LEVEL: i32;
 
     fn build_operator() -> String;
 }

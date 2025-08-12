@@ -103,7 +103,10 @@ where
         context: &Context,
         _code: PhantomData<BindingClause<Expression, Alias>>,
     ) -> String {
-        let expression = context.build_expression(PhantomData);
+        let mut expression = context.build_expression(PhantomData);
+        if context.level() == i32::MAX {
+            expression = format!("({})", expression);
+        }
         let alias = Alias::default();
         if alias.to_string() == "" {
             expression
@@ -142,7 +145,7 @@ where
     Alias: Default + Display,
     Name: Default + Display,
 {
-    fn level(_context: &Context) -> u64 {
+    fn level(_context: &Context) -> i32 {
         return 0;
     }
 
@@ -160,7 +163,7 @@ where
     Context: CanCollectFunctionCallArgs<Args> + HasFunction<Name>,
     Name: Default + Display,
 {
-    fn level(_context: &Context) -> u64 {
+    fn level(_context: &Context) -> i32 {
         return 0;
     }
 
@@ -179,7 +182,7 @@ impl<Context, Content> ExpressionClauseBuilder<Context, StringClause<Content>> f
 where
     Content: Default + Display,
 {
-    fn level(_context: &Context) -> u64 {
+    fn level(_context: &Context) -> i32 {
         return 0;
     }
 
@@ -193,7 +196,7 @@ impl<Context, Content> ExpressionClauseBuilder<Context, IntegerClause<Content>> 
 where
     Content: Default + Display,
 {
-    fn level(_context: &Context) -> u64 {
+    fn level(_context: &Context) -> i32 {
         return 0;
     }
 
@@ -207,7 +210,7 @@ impl<Context, Table> ExpressionClauseBuilder<Context, TableReferenceClause<Table
 where
     Table: IsTable,
 {
-    fn level(_context: &Context) -> u64 {
+    fn level(_context: &Context) -> i32 {
         return 0;
     }
 
@@ -222,7 +225,7 @@ impl<Context, Left, Operator, Right>
 where
     Context: CanBuildExpressionClause<Left> + CanBuildExpressionClause<Right> + HasOperator<Operator>,
 {
-    fn level(_context: &Context) -> u64 {
+    fn level(_context: &Context) -> i32 {
         return <Context as HasOperator<Operator>>::LEVEL;
     }
 
@@ -272,5 +275,33 @@ where
     ) {
         collection.push(context.build_expression(PhantomData::<Head>));
         Sqlx::collect_function_call_args(context, PhantomData, collection)
+    }
+}
+
+#[cgp_provider]
+impl<Context, Projection, From, Where> ExpressionClauseBuilder<Context, SelectClause<Projection, From, Where>> for Sqlx
+where 
+    Context: CanBuildProjectionClause<Projection> + CanBuildFromClause<From> + CanBuildWhereClause<Where>
+{
+    fn level(_context: &Context) -> i32 {
+        return i32::MAX;
+    }
+    
+    fn build_expression(
+        context: &Context,
+        _code: PhantomData<SelectClause<Projection, From, Where>>,
+    ) -> String {
+        let projection_clause = context.build_projection(PhantomData);
+        let from_clause = context.build_from(PhantomData);
+        let where_clause = context.build_where(PhantomData);
+        let mut result = String::new();
+        result.push_str(format!("select {}", projection_clause).as_str());
+        if let Some(from_clause) = from_clause {
+            result.push_str(format!(" from {}", from_clause).as_str());
+        }
+        if let Some(where_clause) = where_clause {
+            result.push_str(format!(" where {}", where_clause).as_str());
+        }
+        result
     }
 }

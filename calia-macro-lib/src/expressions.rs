@@ -392,13 +392,11 @@ impl Parse for PrimaryExpressionClause {
         if input.peek(Token![|]) && input.peek2(Ident) {
             return Ok(PrimaryExpressionClause::SubstitutionPoint(input.parse()?));
         }
+        if input.peek(keyword::select) {
+            return Ok(PrimaryExpressionClause::Select(Box::new(input.parse()?)));
+        }
         if input.peek(Ident) {
             return Ok(PrimaryExpressionClause::TableReference(input.parse()?));
-        }
-        if input.peek(token::Paren) && input.peek2(keyword::select) {
-            let content;
-            parenthesized!(content in input);
-            return Ok(PrimaryExpressionClause::Select(Box::new(content.parse()?)));
         }
         if input.peek(token::Paren) {
             let content;

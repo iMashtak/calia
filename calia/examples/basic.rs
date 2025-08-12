@@ -8,10 +8,12 @@ dialect! {MyDialect as Sqlx db PostgreSql version "17.5"}
 
 table! {ScopeTable as scope (id, name, age)}
 
+table! {UserTable as user (id, name, age)}
+
 query! {SelectScopes,
-    select s.name as name
+    select s.id as name
     from ScopeTable as s
-    where 1
+    where (select u.id as id from UserTable as u where u.age < s.age) = 0
 }
 
 expression! {SampleExpression [s is ScopeTable] s.age or 5}
@@ -36,7 +38,7 @@ pub struct PostgreSql<Version>(pub PhantomData<Version>);
 
 #[cgp_provider]
 impl<Context, Version> OperatorChecker<Context, LtOperatorClause> for PostgreSql<Version> {
-    const LEVEL: u64 = 1;
+    const LEVEL: i32 = 1;
 
     fn build_operator() -> String {
         format!("<")
@@ -45,7 +47,7 @@ impl<Context, Version> OperatorChecker<Context, LtOperatorClause> for PostgreSql
 
 #[cgp_provider]
 impl<Context, Version> OperatorChecker<Context, GtOperatorClause> for PostgreSql<Version> {
-    const LEVEL: u64 = 1;
+    const LEVEL: i32 = 1;
 
     fn build_operator() -> String {
         format!(">")
@@ -54,7 +56,7 @@ impl<Context, Version> OperatorChecker<Context, GtOperatorClause> for PostgreSql
 
 #[cgp_provider]
 impl<Context, Version> OperatorChecker<Context, EqOperatorClause> for PostgreSql<Version> {
-    const LEVEL: u64 = 2;
+    const LEVEL: i32 = 2;
 
     fn build_operator() -> String {
         format!("=")
@@ -63,7 +65,7 @@ impl<Context, Version> OperatorChecker<Context, EqOperatorClause> for PostgreSql
 
 #[cgp_provider]
 impl<Context, Version> OperatorChecker<Context, AndOperatorClause> for PostgreSql<Version> {
-    const LEVEL: u64 = 3;
+    const LEVEL: i32 = 3;
 
     fn build_operator() -> String {
         format!("and")
@@ -72,7 +74,7 @@ impl<Context, Version> OperatorChecker<Context, AndOperatorClause> for PostgreSq
 
 #[cgp_provider]
 impl<Context, Version> OperatorChecker<Context, OrOperatorClause> for PostgreSql<Version> {
-    const LEVEL: u64 = 4;
+    const LEVEL: i32 = 4;
 
     fn build_operator() -> String {
         format!("or")
