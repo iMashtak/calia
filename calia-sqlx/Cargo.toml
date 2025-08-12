@@ -1,0 +1,8 @@
+[package]
+name = "calia-sqlx"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+calia.workspace = true
+cgp.workspace = true

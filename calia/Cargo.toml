@@ -6,3 +6,6 @@ edition.workspace = true
 [dependencies]
 calia-macro.workspace = true
 cgp.workspace = true
+
+[dev-dependencies]
+calia-sqlx.workspace = true
