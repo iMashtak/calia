@@ -49,13 +49,15 @@ pub struct WhereClause {
 #[derive(Clone, Debug)]
 pub enum ExpressionClause {
     Primary(PrimaryExpressionClause),
-    UnaryOperator(UnaryOperatorClause),
+    UnaryPrefixOperator(UnaryPrefixOperatorClause),
+    UnaryPostfixOperator(UnaryPostfixOperatorClause),
     BinaryOperator(BinaryOperatorClause),
     Case(CaseClause),
 }
 
 #[derive(Clone, Debug)]
 pub enum PrimaryExpressionClause {
+    Null,
     Parameter(ParameterClause),
     String(StringClause),
     Integer(IntegerClause),
@@ -70,6 +72,7 @@ pub enum PrimaryExpressionClause {
 #[derive(Clone, Debug)]
 pub struct ParameterClause {
     name: Option<Ident>,
+    number: Option<LitInt>,
 }
 
 #[derive(Clone, Debug)]
@@ -105,9 +108,15 @@ pub struct TableReferenceClause {
 }
 
 #[derive(Clone, Debug)]
-pub struct UnaryOperatorClause {
+pub struct UnaryPrefixOperatorClause {
     operator: TokenStream,
-    expression: Box<ExpressionClause>,
+    value: Box<ExpressionClause>,
+}
+
+#[derive(Clone, Debug)]
+pub struct UnaryPostfixOperatorClause {
+    operator: TokenStream,
+    value: Box<ExpressionClause>,
 }
 
 #[derive(Clone, Debug)]
@@ -279,29 +288,73 @@ impl ToCgpSql for WhereClause {
 #[derive(Clone, Debug)]
 enum S {
     Atom(PrimaryExpressionClause),
-    Cons(TokenStream, Vec<S>),
+    Cons(TokenStream, Vec<S>, OperatorPosition),
+}
+
+#[derive(Clone, Debug)]
+enum OperatorPosition {
+    Prefix,
+    Infix,
+    Postfix,
 }
 
 impl Parse for ExpressionClause {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         fn parse_to_s_expression(input: &ParseBuffer, min_binding_power: i32) -> syn::Result<S> {
-            let left: PrimaryExpressionClause = input.parse()?;
-            let mut left_s = S::Atom(left);
+            let mut left_s = if input.peek(Token![!]) || input.peek(keyword::not) {
+                if input.peek(Token![!]) {
+                    input.parse::<Token![!]>()?;
+                } else if input.peek(keyword::not) {
+                    input.parse::<keyword::not>()?;
+                }
+                let right_binding_power = 41;
+                let right_s = parse_to_s_expression(input, right_binding_power)?;
+                S::Cons(
+                    quote! {NotOperatorClause},
+                    vec![right_s],
+                    OperatorPosition::Prefix,
+                )
+            } else {
+                let left: PrimaryExpressionClause = input.parse()?;
+                S::Atom(left)
+            };
             loop {
                 if input.is_empty() {
                     break;
                 }
                 let (operator, left_binding_power, right_binding_power) = if input.peek(keyword::or)
                 {
-                    (quote! {OrOperatorClause}, 1, 2)
+                    (quote! {OrOperatorClause}, 10, 11)
                 } else if input.peek(keyword::and) {
-                    (quote! {AndOperatorClause}, 3, 4)
+                    (quote! {AndOperatorClause}, 30, 31)
                 } else if input.peek(Token![=]) {
-                    (quote! {EqOperatorClause}, 5, 6)
+                    (quote! {EqOperatorClause}, 50, 51)
                 } else if input.peek(Token![<]) {
-                    (quote! {LtOperatorClause}, 7, 8)
+                    (quote! {LtOperatorClause}, 70, 71)
                 } else if input.peek(Token![>]) {
-                    (quote! {GtOperatorClause}, 7, 8)
+                    (quote! {GtOperatorClause}, 70, 71)
+                } else if input.peek(keyword::like) {
+                    (quote! {LikeOperatorClause}, 90, 91)
+                } else if input.peek(keyword::ilike) {
+                    (quote! {ILikeOperatorClause}, 90, 91)
+                } else if input.peek(keyword::overlaps) {
+                    (quote! {OverlapsOperatorClause}, 110, 111)
+                } else if input.peek(Token![in]) {
+                    (quote! {InOperatorClause}, 150, 151)
+                } else if input.peek(keyword::is) {
+                    (quote! {IsOperatorClause}, 190, 191)
+                } else if input.peek(Token![+]) {
+                    (quote! {PlusOperatorClause}, 210, 211)
+                } else if input.peek(Token![-]) {
+                    (quote! {MinusOperatorClause}, 210, 211)
+                } else if input.peek(Token![*]) {
+                    (quote! {MulOperatorClause}, 230, 231)
+                } else if input.peek(Token![/]) {
+                    (quote! {DivOperatorClause}, 230, 231)
+                } else if input.peek(Token![%]) {
+                    (quote! {ModOperatorClause}, 230, 231)
+                } else if input.peek(Token![^]) {
+                    (quote! {ExpOperatorClause}, 250, 251)
                 } else {
                     return Err(input.error("unknown operator"));
                 };
@@ -318,11 +371,33 @@ impl Parse for ExpressionClause {
                     input.parse::<Token![<]>()?;
                 } else if input.peek(Token![>]) {
                     input.parse::<Token![>]>()?;
+                } else if input.peek(keyword::like) {
+                    input.parse::<keyword::like>()?;
+                } else if input.peek(keyword::ilike) {
+                    input.parse::<keyword::ilike>()?;
+                } else if input.peek(keyword::overlaps) {
+                    input.parse::<keyword::overlaps>()?;
+                } else if input.peek(Token![in]) {
+                    input.parse::<Token![in]>()?;
+                } else if input.peek(keyword::is) {
+                    input.parse::<keyword::is>()?;
+                } else if input.peek(Token![+]) {
+                    input.parse::<Token![+]>()?;
+                } else if input.peek(Token![-]) {
+                    input.parse::<Token![-]>()?;
+                } else if input.peek(Token![*]) {
+                    input.parse::<Token![*]>()?;
+                } else if input.peek(Token![/]) {
+                    input.parse::<Token![/]>()?;
+                } else if input.peek(Token![%]) {
+                    input.parse::<Token![%]>()?;
+                } else if input.peek(Token![^]) {
+                    input.parse::<Token![^]>()?;
                 } else {
                     return Err(input.error("unknown operator"));
                 };
                 let right_s = parse_to_s_expression(input, right_binding_power)?;
-                left_s = S::Cons(operator, vec![left_s, right_s]);
+                left_s = S::Cons(operator, vec![left_s, right_s], OperatorPosition::Infix);
             }
             Ok(left_s)
         }
@@ -330,17 +405,38 @@ impl Parse for ExpressionClause {
         fn convert_to_def(s: S) -> syn::Result<ExpressionClause> {
             match s {
                 S::Atom(clause) => Ok(ExpressionClause::Primary(clause)),
-                S::Cons(operator, args) => {
-                    if args.len() != 2 {
-                        return Err(syn::Error::new(operator.span(), "expected binary operator"));
+                S::Cons(operator, args, position) => {
+                    if args.len() == 1 {
+                        let value = convert_to_def(args[0].clone())?;
+                        match position {
+                            OperatorPosition::Prefix => Ok(ExpressionClause::UnaryPrefixOperator(
+                                UnaryPrefixOperatorClause {
+                                    operator,
+                                    value: Box::new(value),
+                                },
+                            )),
+                            OperatorPosition::Postfix => Ok(ExpressionClause::UnaryPostfixOperator(
+                                UnaryPostfixOperatorClause {
+                                    operator,
+                                    value: Box::new(value),
+                                },
+                            )),
+                            _ => unreachable!()
+                        }
+                    } else if args.len() == 2 {
+                        let left = convert_to_def(args[0].clone())?;
+                        let right = convert_to_def(args[1].clone())?;
+                        Ok(ExpressionClause::BinaryOperator(BinaryOperatorClause {
+                            left: Box::new(left),
+                            operator,
+                            right: Box::new(right),
+                        }))
+                    } else {
+                        Err(syn::Error::new(
+                            operator.span(),
+                            "unexpected operator arity",
+                        ))
                     }
-                    let left = convert_to_def(args[0].clone())?;
-                    let right = convert_to_def(args[1].clone())?;
-                    Ok(ExpressionClause::BinaryOperator(BinaryOperatorClause {
-                        left: Box::new(left),
-                        operator,
-                        right: Box::new(right),
-                    }))
                 }
             }
         }
@@ -356,7 +452,29 @@ impl ToCgpSql for ExpressionClause {
         match self {
             Self::Primary(x) => x.to_cgp_sql(context),
             Self::BinaryOperator(x) => x.to_cgp_sql(context),
+            Self::UnaryPrefixOperator(x) => x.to_cgp_sql(context),
+            Self::UnaryPostfixOperator(x) => x.to_cgp_sql(context),
             _ => todo!(),
+        }
+    }
+}
+
+impl ToCgpSql for UnaryPrefixOperatorClause {
+    fn to_cgp_sql(&self, context: &mut CgpSqlContext) -> TokenStream {
+        let operator = &self.operator;
+        let value = self.value.to_cgp_sql(context);
+        quote! {
+            UnaryPrefixOperatorClause<#operator, #value>
+        }
+    }
+}
+
+impl ToCgpSql for UnaryPostfixOperatorClause {
+    fn to_cgp_sql(&self, context: &mut CgpSqlContext) -> TokenStream {
+        let operator = &self.operator;
+        let value = self.value.to_cgp_sql(context);
+        quote! {
+            UnaryPostfixOperatorClause<#operator, #value>
         }
     }
 }
@@ -374,7 +492,11 @@ impl ToCgpSql for BinaryOperatorClause {
 
 impl Parse for PrimaryExpressionClause {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.peek(Token![?]) || (input.peek(Token![:]) && input.peek2(Ident)) {
+        if input.peek(keyword::null) {
+            input.parse::<keyword::null>()?;
+            return Ok(PrimaryExpressionClause::Null);
+        }
+        if input.peek(Token![?]) {
             return Ok(PrimaryExpressionClause::Parameter(input.parse()?));
         }
         if input.peek(LitStr) {
@@ -412,6 +534,7 @@ impl Parse for PrimaryExpressionClause {
 impl ToCgpSql for PrimaryExpressionClause {
     fn to_cgp_sql(&self, context: &mut CgpSqlContext) -> TokenStream {
         match self {
+            PrimaryExpressionClause::Null => quote! {NullValueClause},
             PrimaryExpressionClause::Parameter(x) => x.to_cgp_sql(context),
             PrimaryExpressionClause::String(x) => x.to_cgp_sql(context),
             PrimaryExpressionClause::Integer(x) => x.to_cgp_sql(context),
@@ -427,26 +550,43 @@ impl ToCgpSql for PrimaryExpressionClause {
 
 impl Parse for ParameterClause {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.peek(Token![?]) {
-            Ok(ParameterClause { name: None })
-        } else {
-            input.parse::<Token![:]>()?;
+        input.parse::<Token![?]>()?;
+        if input.peek(LitInt) {
+            let number: LitInt = input.parse()?;
+            Ok(ParameterClause {
+                name: None,
+                number: Some(number),
+            })
+        } else if input.peek(Ident) {
             let name: Ident = input.parse()?;
-            Ok(ParameterClause { name: Some(name) })
+            Ok(ParameterClause {
+                name: Some(name),
+                number: None,
+            })
+        } else {
+            Ok(ParameterClause {
+                name: None,
+                number: None,
+            })
         }
     }
 }
 
 impl ToCgpSql for ParameterClause {
     fn to_cgp_sql(&self, _context: &mut CgpSqlContext) -> TokenStream {
-        match &self.name {
-            Some(name) => {
+        match (&self.name, &self.number) {
+            (Some(name), None) => {
                 let name = LitStr::new(name.to_string().as_str(), name.span());
                 quote! {NamedParameterClause<symbol!(#name)>}
             }
-            None => {
-                quote! {UnnamedParameterClause}
+            (None, Some(number)) => {
+                let number = LitStr::new(number.base10_digits(), number.span());
+                quote! {NumberedParameterClause<symbol!(#number)>}
             }
+            (None, None) => {
+                quote! {UnmarkedParameterClause}
+            }
+            _ => unreachable!(),
         }
     }
 }

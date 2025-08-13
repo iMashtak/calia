@@ -9,3 +9,4 @@ cgp.workspace = true
 
 [dev-dependencies]
 calia-sqlx.workspace = true
+calia-postgresql.workspace = true

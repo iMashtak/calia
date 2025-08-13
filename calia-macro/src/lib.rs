@@ -1,10 +1,4 @@
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
-use syn::{
-    Ident, LitInt, Token, Type,
-    parse::{Parse, ParseStream},
-    parse_macro_input,
-};
 
 #[proc_macro]
 pub fn query(body: TokenStream) -> TokenStream {

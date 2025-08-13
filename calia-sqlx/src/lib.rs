@@ -104,7 +104,7 @@ where
         _code: PhantomData<BindingClause<Expression, Alias>>,
     ) -> String {
         let mut expression = context.build_expression(PhantomData);
-        if context.level() == i32::MAX {
+        if context.level() < i32::MAX {
             expression = format!("({})", expression);
         }
         let alias = Alias::default();
@@ -145,10 +145,6 @@ where
     Alias: Default + Display,
     Name: Default + Display,
 {
-    fn level(_context: &Context) -> i32 {
-        return 0;
-    }
-
     fn build_expression(
         _context: &Context,
         _code: PhantomData<FieldReferenceClause<Table, Alias, Name>>,
@@ -163,10 +159,6 @@ where
     Context: CanCollectFunctionCallArgs<Args> + HasFunction<Name>,
     Name: Default + Display,
 {
-    fn level(_context: &Context) -> i32 {
-        return 0;
-    }
-
     fn build_expression(
         context: &Context,
         _code: PhantomData<FunctionCallClause<Name, Args>>,
@@ -182,24 +174,25 @@ impl<Context, Content> ExpressionClauseBuilder<Context, StringClause<Content>> f
 where
     Content: Default + Display,
 {
-    fn level(_context: &Context) -> i32 {
-        return 0;
-    }
-
     fn build_expression(_context: &Context, _code: PhantomData<StringClause<Content>>) -> String {
         format!("\"{}\"", Content::default())
     }
 }
+
+// TODO empty strings
+// #[cgp_provider]
+// impl<Context> ExpressionClauseBuilder<Context, StringClause<Nil>> for Sqlx
+// {
+//     fn build_expression(_context: &Context, _code: PhantomData<StringClause<Nil>>) -> String {
+//         format!("\"\"")
+//     }
+// }
 
 #[cgp_provider]
 impl<Context, Content> ExpressionClauseBuilder<Context, IntegerClause<Content>> for Sqlx
 where
     Content: Default + Display,
 {
-    fn level(_context: &Context) -> i32 {
-        return 0;
-    }
-
     fn build_expression(_context: &Context, _code: PhantomData<IntegerClause<Content>>) -> String {
         format!("{}", Content::default())
     }
@@ -210,11 +203,10 @@ impl<Context, Table> ExpressionClauseBuilder<Context, TableReferenceClause<Table
 where
     Table: IsTable,
 {
-    fn level(_context: &Context) -> i32 {
-        return 0;
-    }
-
-    fn build_expression(_context: &Context, _code: PhantomData<TableReferenceClause<Table>>) -> String {
+    fn build_expression(
+        _context: &Context,
+        _code: PhantomData<TableReferenceClause<Table>>,
+    ) -> String {
         format!("{}", Table::Name::default())
     }
 }
@@ -223,7 +215,8 @@ where
 impl<Context, Left, Operator, Right>
     ExpressionClauseBuilder<Context, BinaryOperatorClause<Left, Operator, Right>> for Sqlx
 where
-    Context: CanBuildExpressionClause<Left> + CanBuildExpressionClause<Right> + HasOperator<Operator>,
+    Context:
+        CanBuildExpressionClause<Left> + CanBuildExpressionClause<Right> + HasOperator<Operator>,
 {
     fn level(_context: &Context) -> i32 {
         return <Context as HasOperator<Operator>>::LEVEL;
@@ -238,11 +231,11 @@ where
         let operator_level = <Context as HasOperator<Operator>>::LEVEL;
         let mut left = context.build_expression(PhantomData::<Left>);
         let mut right = context.build_expression(PhantomData::<Right>);
-        let operator = <Context as HasOperator<Operator>>::build_operator();
-        if left_level > operator_level {
+        let operator = context.build_operator(PhantomData);
+        if left_level < operator_level {
             left = format!("({})", left);
         }
-        if right_level > operator_level {
+        if right_level < operator_level {
             right = format!("({})", right);
         }
         format!("{} {} {}", left, operator, right)
@@ -279,14 +272,17 @@ where
 }
 
 #[cgp_provider]
-impl<Context, Projection, From, Where> ExpressionClauseBuilder<Context, SelectClause<Projection, From, Where>> for Sqlx
-where 
-    Context: CanBuildProjectionClause<Projection> + CanBuildFromClause<From> + CanBuildWhereClause<Where>
+impl<Context, Projection, From, Where>
+    ExpressionClauseBuilder<Context, SelectClause<Projection, From, Where>> for Sqlx
+where
+    Context: CanBuildProjectionClause<Projection>
+        + CanBuildFromClause<From>
+        + CanBuildWhereClause<Where>,
 {
     fn level(_context: &Context) -> i32 {
-        return i32::MAX;
+        return -1;
     }
-    
+
     fn build_expression(
         context: &Context,
         _code: PhantomData<SelectClause<Projection, From, Where>>,
@@ -303,5 +299,77 @@ where
             result.push_str(format!(" where {}", where_clause).as_str());
         }
         result
+    }
+}
+
+pub enum SqlxPlaceholderSyntax {
+    DollarSignPrefixedNumber,
+    QuestionMark,
+}
+
+#[cgp_provider]
+impl<Context, Number> ExpressionClauseBuilder<Context, NumberedParameterClause<Number>> for Sqlx
+where
+    Context: HasField<symbol!("sqlx_placeholder_syntax"), Value = SqlxPlaceholderSyntax>,
+    Number: Default + Display,
+{
+    fn build_expression(
+        context: &Context,
+        _code: PhantomData<NumberedParameterClause<Number>>,
+    ) -> String {
+        let syntax = context.get_field(PhantomData);
+        match syntax {
+            SqlxPlaceholderSyntax::DollarSignPrefixedNumber => format!("${}", Number::default()),
+            SqlxPlaceholderSyntax::QuestionMark => "?".to_string(),
+        }
+    }
+}
+
+#[cgp_provider]
+impl<Context, Operator, Value> ExpressionClauseBuilder<Context, UnaryPrefixOperatorClause<Operator, Value>> for Sqlx 
+where 
+    Context: HasOperator<Operator> + CanBuildExpressionClause<Value>
+{
+    fn level(_context: &Context) -> i32 {
+        <Context as HasOperator<Operator>>::LEVEL
+    }
+
+    fn build_expression(
+        context: &Context,
+        _code: PhantomData<UnaryPrefixOperatorClause<Operator, Value>>,
+    ) -> String {
+        let operator = context.build_operator(PhantomData);
+        let value = context.build_expression(PhantomData);
+        format!("{} {}", operator, value)
+    }
+}
+
+#[cgp_provider]
+impl<Context, Operator, Value> ExpressionClauseBuilder<Context, UnaryPostfixOperatorClause<Operator, Value>> for Sqlx 
+where 
+    Context: HasOperator<Operator> + CanBuildExpressionClause<Value>
+{
+    fn level(_context: &Context) -> i32 {
+        <Context as HasOperator<Operator>>::LEVEL
+    }
+
+    fn build_expression(
+        context: &Context,
+        _code: PhantomData<UnaryPostfixOperatorClause<Operator, Value>>,
+    ) -> String {
+        let operator = context.build_operator(PhantomData);
+        let value = context.build_expression(PhantomData);
+        format!("{} {}", value, operator)
+    }
+}
+
+#[cgp_provider]
+impl<Context> ExpressionClauseBuilder<Context, NullValueClause> for Sqlx 
+{
+    fn build_expression(
+        _context: &Context,
+        _code: PhantomData<NullValueClause>,
+    ) -> String {
+        format!("null")
     }
 }

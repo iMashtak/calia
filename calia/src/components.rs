@@ -34,7 +34,9 @@ pub trait CanBuildWhereClause<Code> {
 
 #[cgp_component(ExpressionClauseBuilder)]
 pub trait CanBuildExpressionClause<Code> {
-    fn level(&self) -> i32;
+    fn level(&self) -> i32 {
+        i32::MAX
+    }
 
     fn build_expression(&self, code: PhantomData<Code>) -> String;
 }

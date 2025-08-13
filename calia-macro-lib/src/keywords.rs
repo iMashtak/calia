@@ -15,4 +15,11 @@ pub mod keyword {
     custom_keyword!(version);
 
     custom_keyword!(is);
+    custom_keyword!(like);
+    custom_keyword!(ilike);
+    custom_keyword!(overlaps);
+    custom_keyword!(between);
+    custom_keyword!(not);
+
+    custom_keyword!(null);
 }

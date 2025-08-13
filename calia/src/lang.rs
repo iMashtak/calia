@@ -1,8 +1,12 @@
 use std::marker::PhantomData;
 
+pub struct NullValueClause(pub PhantomData<()>);
+
+pub struct UnmarkedParameterClause(pub PhantomData<()>);
+
 pub struct NamedParameterClause<Name>(pub PhantomData<Name>);
 
-pub struct UnnamedParameterClause(pub PhantomData<()>);
+pub struct NumberedParameterClause<Number>(pub PhantomData<Number>);
 
 pub struct SelectClause<Projection, From = (), Where = ()>(pub PhantomData<(Projection, From, Where)>);
 
@@ -25,3 +29,7 @@ pub struct StringClause<Content>(pub PhantomData<Content>);
 pub struct IntegerClause<Content>(pub PhantomData<Content>);
 
 pub struct BinaryOperatorClause<Left, Operator, Right>(pub PhantomData<(Left, Operator, Right)>);
+
+pub struct UnaryPrefixOperatorClause<Operator, Value>(pub PhantomData<(Operator, Value)>);
+
+pub struct UnaryPostfixOperatorClause<Operator, Value>(pub PhantomData<(Operator, Value)>);

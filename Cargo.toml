@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["calia", "calia-macro", "calia-macro-lib", "calia-sqlx"]
+members = ["calia", "calia-macro", "calia-macro-lib", "calia-postgresql", "calia-sqlx"]
 
 [workspace.package]
 name = "calia"
@@ -12,6 +12,7 @@ calia = { path = "calia", version = "0.1.0" }
 calia-macro = { path = "calia-macro", version = "0.1.0" }
 calia-macro-lib = { path = "calia-macro-lib", version = "0.1.0" }
 
+calia-postgresql = { path = "calia-postgresql", version = "0.1.0" }
 calia-sqlx = { path = "calia-sqlx", version = "0.1.0" }
 
 cgp = { version = "0.4.1" }
