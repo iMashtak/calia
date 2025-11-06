@@ -37,7 +37,7 @@ pub fn make_table(body: TokenStream) -> TokenStream {
     for name in &table_def.columns {
         let name = LitStr::new(name.to_string().as_str(), name.span());
         has_typed_field_impls.push(quote! {
-            impl HasTypedField<symbol!(#name)> for #table_ty {
+            impl HasTypedField<Symbol!(#name)> for #table_ty {
                 type Type = ();
             }
         });
@@ -46,7 +46,7 @@ pub fn make_table(body: TokenStream) -> TokenStream {
         pub struct #table_ty;
 
         impl IsTable for #table_ty {
-            type Name = symbol!(#table_name);
+            type Name = Symbol!(#table_name);
         }
 
         #(#has_typed_field_impls)*

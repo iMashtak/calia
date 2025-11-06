@@ -249,7 +249,7 @@ impl ToCgpSql for BindingClause {
         let expression = self.expression.to_cgp_sql(context);
         let alias = &self.alias;
         let alias = LitStr::new(alias.to_string().as_str(), alias.span());
-        quote! {BindingClause<#expression, symbol!(#alias)>}
+        quote! {BindingClause<#expression, Symbol!(#alias)>}
     }
 }
 
@@ -577,11 +577,11 @@ impl ToCgpSql for ParameterClause {
         match (&self.name, &self.number) {
             (Some(name), None) => {
                 let name = LitStr::new(name.to_string().as_str(), name.span());
-                quote! {NamedParameterClause<symbol!(#name)>}
+                quote! {NamedParameterClause<Symbol!(#name)>}
             }
             (None, Some(number)) => {
                 let number = LitStr::new(number.base10_digits(), number.span());
-                quote! {NumberedParameterClause<symbol!(#number)>}
+                quote! {NumberedParameterClause<Symbol!(#number)>}
             }
             (None, None) => {
                 quote! {UnmarkedParameterClause}
@@ -602,7 +602,7 @@ impl ToCgpSql for StringClause {
     fn to_cgp_sql(&self, _context: &mut CgpSqlContext) -> TokenStream {
         let value = &self.value;
         quote! {
-            StringClause<symbol!(#value)>
+            StringClause<Symbol!(#value)>
         }
     }
 }
@@ -619,7 +619,7 @@ impl ToCgpSql for IntegerClause {
         let value = &self.value;
         let value = LitStr::new(value.base10_digits(), value.span());
         quote! {
-            IntegerClause<symbol!(#value)>
+            IntegerClause<Symbol!(#value)>
         }
     }
 }
@@ -643,7 +643,7 @@ impl ToCgpSql for FieldReferenceClause {
         let alias = LitStr::new(alias_str.as_str(), self.alias.span());
         let name = LitStr::new(self.field.to_string().as_str(), self.field.span());
         quote! {
-            FieldReferenceClause<#table, symbol!(#alias), symbol!(#name)>
+            FieldReferenceClause<#table, Symbol!(#alias), Symbol!(#name)>
         }
     }
 }
@@ -668,7 +668,7 @@ impl ToCgpSql for FunctionClause {
             args.push(arg.to_cgp_sql(context));
         }
         quote! {
-            FunctionCallClause<symbol!(#name), Product![#(#args),*]>
+            FunctionCallClause<Symbol!(#name), Product![#(#args),*]>
         }
     }
 }

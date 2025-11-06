@@ -163,4 +163,4 @@ impl<Context, Version> OperatorChecker<Context, ExpOperatorClause> for PostgreSq
 // --- functions ---
 
 #[cgp_provider]
-impl<Context, Version> FunctionChecker<Context, symbol!("concat")> for PostgreSql<Version> {}
+impl<Context, Version> FunctionChecker<Context, Symbol!("concat")> for PostgreSql<Version> {}

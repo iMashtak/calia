@@ -23,7 +23,7 @@ query! {SelectScopes,
     and s.name = ?1 and s.age like "%some%"
 }
 
-expression! {SampleExpression [s is ScopeTable] s.age = "x"}
+expression! {SampleExpression [s is ScopeTable] s.age = ""}
 
 query! {SelectTemplate,
     select s.id as id

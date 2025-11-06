@@ -45,3 +45,8 @@ pub trait CanBuildExpressionClause<Code> {
 pub trait CanCollectFunctionCallArgs<Code> {
     fn collect_function_call_args(&self, code: PhantomData<Code>, collection: &mut Vec<String>);
 }
+
+#[cgp_component(StringContentCollector)]
+pub trait CanCollectStringContent<Code> {
+    fn collect_content(&self, code: PhantomData<Code>, string: &mut String);
+}

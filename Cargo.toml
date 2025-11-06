@@ -15,4 +15,4 @@ calia-macro-lib = { path = "calia-macro-lib", version = "0.1.0" }
 calia-postgresql = { path = "calia-postgresql", version = "0.1.0" }
 calia-sqlx = { path = "calia-sqlx", version = "0.1.0" }
 
-cgp = { version = "0.4.1" }
+cgp = { version = "0.6.0" }

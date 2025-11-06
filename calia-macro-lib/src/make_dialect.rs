@@ -74,11 +74,12 @@ pub fn make_dialect(body: TokenStream) -> TokenStream {
                     WhereClauseBuilderComponent,
                     ExpressionClauseBuilderComponent,
                     FunctionCallArgsCollectorComponent,
+                    StringContentCollectorComponent,
                 ]: #provider,
                 [
                     OperatorCheckerComponent,
                     FunctionCheckerComponent,
-                ]: #db<symbol!(#version)>,
+                ]: #db<Symbol!(#version)>,
             }
         }
     }

@@ -87,7 +87,7 @@ where
         _code: PhantomData<Cons<Head, Tail>>,
         collection: &mut Vec<String>,
     ) {
-        collection.push(context.build_binding(PhantomData::<Head>));
+        collection.push(context.build_binding(PhantomData));
         Sqlx::collect_bindings(context, PhantomData, collection)
     }
 }
@@ -170,23 +170,40 @@ where
 }
 
 #[cgp_provider]
-impl<Context, Content> ExpressionClauseBuilder<Context, StringClause<Content>> for Sqlx
+impl<Context, Content, const N: usize>
+    ExpressionClauseBuilder<Context, StringClause<Symbol<N, Content>>> for Sqlx
 where
-    Content: Default + Display,
+    Sqlx: StringContentCollector<Context, Content>,
 {
-    fn build_expression(_context: &Context, _code: PhantomData<StringClause<Content>>) -> String {
-        format!("\"{}\"", Content::default())
+    fn build_expression(
+        context: &Context,
+        _code: PhantomData<StringClause<Symbol<N, Content>>>,
+    ) -> String {
+        let mut string = String::new();
+        Sqlx::collect_content(context, PhantomData, &mut string);
+        format!("\"{}\"", string)
     }
 }
 
-// TODO empty strings
-// #[cgp_provider]
-// impl<Context> ExpressionClauseBuilder<Context, StringClause<Nil>> for Sqlx
-// {
-//     fn build_expression(_context: &Context, _code: PhantomData<StringClause<Nil>>) -> String {
-//         format!("\"\"")
-//     }
-// }
+#[cgp_provider]
+impl<Context, const HEAD: char, Tail> StringContentCollector<Context, Chars<HEAD, Tail>> for Sqlx
+where
+    Sqlx: StringContentCollector<Context, Tail>,
+{
+    fn collect_content(
+        context: &Context,
+        _code: PhantomData<Chars<HEAD, Tail>>,
+        string: &mut String,
+    ) {
+        string.push(HEAD);
+        Sqlx::collect_content(context, PhantomData, string);
+    }
+}
+
+#[cgp_provider]
+impl<Context> StringContentCollector<Context, Nil> for Sqlx {
+    fn collect_content(_context: &Context, _code: PhantomData<Nil>, _string: &mut String) {}
+}
 
 #[cgp_provider]
 impl<Context, Content> ExpressionClauseBuilder<Context, IntegerClause<Content>> for Sqlx
@@ -310,7 +327,7 @@ pub enum SqlxPlaceholderSyntax {
 #[cgp_provider]
 impl<Context, Number> ExpressionClauseBuilder<Context, NumberedParameterClause<Number>> for Sqlx
 where
-    Context: HasField<symbol!("sqlx_placeholder_syntax"), Value = SqlxPlaceholderSyntax>,
+    Context: HasField<Symbol!("sqlx_placeholder_syntax"), Value = SqlxPlaceholderSyntax>,
     Number: Default + Display,
 {
     fn build_expression(
@@ -326,9 +343,10 @@ where
 }
 
 #[cgp_provider]
-impl<Context, Operator, Value> ExpressionClauseBuilder<Context, UnaryPrefixOperatorClause<Operator, Value>> for Sqlx 
-where 
-    Context: HasOperator<Operator> + CanBuildExpressionClause<Value>
+impl<Context, Operator, Value>
+    ExpressionClauseBuilder<Context, UnaryPrefixOperatorClause<Operator, Value>> for Sqlx
+where
+    Context: HasOperator<Operator> + CanBuildExpressionClause<Value>,
 {
     fn level(_context: &Context) -> i32 {
         <Context as HasOperator<Operator>>::LEVEL
@@ -345,9 +363,10 @@ where
 }
 
 #[cgp_provider]
-impl<Context, Operator, Value> ExpressionClauseBuilder<Context, UnaryPostfixOperatorClause<Operator, Value>> for Sqlx 
-where 
-    Context: HasOperator<Operator> + CanBuildExpressionClause<Value>
+impl<Context, Operator, Value>
+    ExpressionClauseBuilder<Context, UnaryPostfixOperatorClause<Operator, Value>> for Sqlx
+where
+    Context: HasOperator<Operator> + CanBuildExpressionClause<Value>,
 {
     fn level(_context: &Context) -> i32 {
         <Context as HasOperator<Operator>>::LEVEL
@@ -364,12 +383,8 @@ where
 }
 
 #[cgp_provider]
-impl<Context> ExpressionClauseBuilder<Context, NullValueClause> for Sqlx 
-{
-    fn build_expression(
-        _context: &Context,
-        _code: PhantomData<NullValueClause>,
-    ) -> String {
+impl<Context> ExpressionClauseBuilder<Context, NullValueClause> for Sqlx {
+    fn build_expression(_context: &Context, _code: PhantomData<NullValueClause>) -> String {
         format!("null")
     }
 }
