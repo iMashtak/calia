@@ -88,7 +88,7 @@ fn main() {
     fn main() {
         ...
 
-        // substitute expression as generic parameter of query type
+        // substitute operator clause as generic parameter of expression type
         let expression: String = build!(use dialect for expression 
             in UserAgeComparedTo18<EqOperatorClause>
         );
@@ -99,7 +99,7 @@ fn main() {
 
 Obviously it needs to implement all parts of `SELECT` query and all other queries.
 
-Also it is desired to implement not only name-checking of SQL-functions but also cheking of their argument types since it matters for SQL queries. Currently I am struggling with Rust type system that do not allow me to use [impl specialization](https://github.com/rust-lang/rust/issues/31844).
+Also it is desired to implement not only name-checking of SQL-functions but also checking of their argument types since it matters for SQL queries. Currently I am struggling with Rust type system that do not allow me to use [impl specialization](https://github.com/rust-lang/rust/issues/31844).
 
 ## Whats inside
 
