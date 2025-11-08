@@ -19,3 +19,8 @@ pub fn table(body: TokenStream) -> TokenStream {
 pub fn dialect(body: TokenStream) -> TokenStream {
     calia_macro_lib::make_dialect(body.into()).into()
 }
+
+#[proc_macro]
+pub fn build(body: TokenStream) -> TokenStream {
+    calia_macro_lib::make_build(body.into()).into()
+}

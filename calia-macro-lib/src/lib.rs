@@ -15,6 +15,10 @@ pub use make_query::make_query;
 
 mod make_expression;
 pub use make_expression::make_expression;
+
+mod make_build;
+pub use make_build::make_build;
+
 use syn::{Ident, Type};
 
 struct CgpSqlContext {

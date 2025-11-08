@@ -28,18 +28,20 @@ expression! {SampleExpression [s is ScopeTable] s.age = ""}
 query! {SelectTemplate,
     select s.id as id
     from ScopeTable as s
-    where (|Sub| and |Sub2|) and ((-5 or 7))
+    where (not |Sub| and |Sub|) and (not (-5 @Op 7))
 }
 
 fn main() {
     let dialect = MyDialect {
         sqlx_placeholder_syntax: SqlxPlaceholderSyntax::QuestionMark,
     };
-    let result = dialect.build_select(PhantomData::<SelectScopes>);
+
+    let result = build!(use dialect for select in SelectScopes);
     println!("{}", result);
-    let result = dialect.build_expression(PhantomData::<SampleExpression>);
+
+    let result = build!(use dialect for expression in SampleExpression);
     println!("{}", result);
-    let result =
-        dialect.build_select(PhantomData::<SelectTemplate<SampleExpression, TrueExpression>>);
+
+    let result = build!(use dialect for select in SelectTemplate<SampleExpression, OrOperatorClause>);
     println!("{}", result);
 }
