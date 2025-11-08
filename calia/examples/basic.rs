@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use calia::prelude::*;
 use calia_postgresql::PostgreSql;
 use calia_sqlx::{Sqlx, SqlxPlaceholderSyntax};
@@ -23,7 +21,7 @@ query! {SelectScopes,
     and s.name = ?1 and s.age like "%some%"
 }
 
-expression! {SampleExpression [s is ScopeTable] s.age = ""}
+expression! {SampleExpression [s is ScopeTable] s.age @Op ""}
 
 query! {SelectTemplate,
     select s.id as id
@@ -39,9 +37,9 @@ fn main() {
     let result = build!(use dialect for select in SelectScopes);
     println!("{}", result);
 
-    let result = build!(use dialect for expression in SampleExpression);
+    let result = build!(use dialect for expression in SampleExpression<EqOperatorClause>);
     println!("{}", result);
 
-    let result = build!(use dialect for select in SelectTemplate<SampleExpression, OrOperatorClause>);
+    let result = build!(use dialect for select in SelectTemplate<SampleExpression<EqOperatorClause>, AndOperatorClause>);
     println!("{}", result);
 }

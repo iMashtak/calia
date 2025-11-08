@@ -54,7 +54,14 @@ pub fn make_expression(body: TokenStream) -> TokenStream {
     }
     let expression = sub.expression;
     let expression = expression.to_cgp_sql(&mut context);
-    quote! {
-        pub type #assign = #expression;
+    if context.substitutions.is_empty() {
+        quote! {
+            pub type #assign = #expression;
+        }
+    } else {
+        let subs = context.substitutions.keys();
+        quote! {
+            pub type #assign<#(#subs),*> = #expression;
+        }
     }
 }
