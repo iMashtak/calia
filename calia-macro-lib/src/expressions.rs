@@ -15,35 +15,35 @@ use crate::{CgpSqlContext, ToCgpSql, keywords::keyword};
 
 #[derive(Clone, Debug)]
 pub struct SelectClause {
-    projection_clause: ProjectionClause,
-    from_clause: Option<FromClause>,
-    where_clause: Option<WhereClause>,
+    pub projection_clause: ProjectionClause,
+    pub from_clause: Option<FromClause>,
+    pub where_clause: Option<WhereClause>,
 }
 
 #[derive(Clone, Debug)]
 pub struct ProjectionClause {
-    bindings: BindingsClause,
+    pub bindings: BindingsClause,
 }
 
 #[derive(Clone, Debug)]
 pub struct FromClause {
-    bindings: BindingsClause,
+    pub bindings: BindingsClause,
 }
 
 #[derive(Clone, Debug)]
 pub struct BindingsClause {
-    values: Vec<BindingClause>,
+    pub values: Vec<BindingClause>,
 }
 
 #[derive(Clone, Debug)]
 pub struct BindingClause {
-    expression: ExpressionClause,
-    alias: Ident,
+    pub expression: ExpressionClause,
+    pub alias: Ident,
 }
 
 #[derive(Clone, Debug)]
 pub struct WhereClause {
-    condition: ExpressionClause,
+    pub condition: ExpressionClause,
 }
 
 #[derive(Clone, Debug)]
@@ -71,67 +71,67 @@ pub enum PrimaryExpressionClause {
 
 #[derive(Clone, Debug)]
 pub struct ParameterClause {
-    name: Option<Ident>,
-    number: Option<LitInt>,
+    pub name: Option<Ident>,
+    pub number: Option<LitInt>,
 }
 
 #[derive(Clone, Debug)]
 pub struct StringClause {
-    value: LitStr,
+    pub value: LitStr,
 }
 
 #[derive(Clone, Debug)]
 pub struct IntegerClause {
-    value: LitInt,
+    pub value: LitInt,
 }
 
 #[derive(Clone, Debug)]
 pub struct FieldReferenceClause {
-    alias: Ident,
-    field: Ident,
+    pub alias: Ident,
+    pub field: Ident,
 }
 
 #[derive(Clone, Debug)]
 pub struct FunctionClause {
-    name: Ident,
-    args: Vec<ExpressionClause>,
+    pub name: Ident,
+    pub args: Vec<ExpressionClause>,
 }
 
 #[derive(Clone, Debug)]
 pub struct SubstitutionPointClause {
-    ty: Type,
+    pub ty: Type,
 }
 
 #[derive(Clone, Debug)]
 pub struct TableReferenceClause {
-    ty: Type,
+    pub ty: Type,
 }
 
 #[derive(Clone, Debug)]
 pub struct UnaryPrefixOperatorClause {
-    operator: TokenStream,
-    value: Box<ExpressionClause>,
+    pub operator: TokenStream,
+    pub value: Box<ExpressionClause>,
 }
 
 #[derive(Clone, Debug)]
 pub struct UnaryPostfixOperatorClause {
-    operator: TokenStream,
-    value: Box<ExpressionClause>,
+    pub operator: TokenStream,
+    pub value: Box<ExpressionClause>,
 }
 
 #[derive(Clone, Debug)]
 pub struct BinaryOperatorClause {
-    left: Box<ExpressionClause>,
-    operator: TokenStream,
-    right: Box<ExpressionClause>,
-    custom_ty: Option<Type>,
+    pub left: Box<ExpressionClause>,
+    pub operator: TokenStream,
+    pub right: Box<ExpressionClause>,
+    pub custom_ty: Option<Type>,
 }
 
 #[derive(Clone, Debug)]
 pub struct CaseClause {
-    expression: Option<Box<ExpressionClause>>,
-    when_then: Vec<(ExpressionClause, ExpressionClause)>,
-    otherwise: Option<Box<ExpressionClause>>,
+    pub expression: Option<Box<ExpressionClause>>,
+    pub when_then: Vec<(ExpressionClause, ExpressionClause)>,
+    pub otherwise: Option<Box<ExpressionClause>>,
 }
 
 // query parsing

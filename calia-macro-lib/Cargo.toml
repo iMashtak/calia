@@ -10,3 +10,4 @@ proc-macro2 = "1.0.92"
 prettyplease = "0.2.27"
 itertools = "0.14.0"
 indexmap = "2"
+chumsky = { version = "0.11", features = ["pratt"] }

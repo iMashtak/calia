@@ -6,6 +6,11 @@ pub fn query(body: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
+pub fn query2(body: TokenStream) -> TokenStream {
+    calia_macro_lib::make_query2(body.into()).into()
+}
+
+#[proc_macro]
 pub fn expression(body: TokenStream) -> TokenStream {
     calia_macro_lib::make_expression(body.into()).into()
 }

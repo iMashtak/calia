@@ -13,6 +13,9 @@ pub use make_table::make_table;
 mod make_query;
 pub use make_query::make_query;
 
+mod make_query2;
+pub use make_query2::make_query2;
+
 mod make_expression;
 pub use make_expression::make_expression;
 

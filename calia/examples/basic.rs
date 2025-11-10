@@ -29,6 +29,12 @@ query! {SelectTemplate,
     where (not |Sub| and |Sub|) and (not (-5 @Op 7))
 }
 
+query2! {
+    SelectTemplateX, 
+    select table.field as alias
+    from ScopeTable as table
+}
+
 fn main() {
     let dialect = MyDialect {
         sqlx_placeholder_syntax: SqlxPlaceholderSyntax::QuestionMark,
