@@ -7,7 +7,7 @@ use chumsky::{
     util::Maybe,
 };
 use indexmap::IndexMap;
-use proc_macro2::{Span, TokenStream, TokenTree, token_stream::IntoIter};
+use proc_macro2::{Delimiter, Span, TokenStream, TokenTree, token_stream::IntoIter};
 use quote::{ToTokens, quote};
 use syn::{Ident, Lit, Token, Type};
 
@@ -21,16 +21,6 @@ use crate::{
 };
 
 macro_rules! define_parser {
-    ($var: ident, $parsing: ty, $ident: ident => $body: expr, $message: literal) => {
-        let $var = any().try_map(|x: TokenTree, s: SimpleSpan| {
-            let parsed = syn::parse2::<$parsing>(x.to_token_stream());
-            match parsed {
-                Ok($ident) => $body,
-                Err(_) => Err(Messaged::new($message, Simple::new(Some(Maybe::Val(x)), s))),
-            }
-        });
-    };
-
     ($var: ident, $keyword: literal, $message: literal) => {
         let $var = any().try_map(|x: TokenTree, s: SimpleSpan| {
             let parsed = syn::parse2::<Ident>(x.to_token_stream());
@@ -47,6 +37,16 @@ macro_rules! define_parser {
             match parsed {
                 Ok(_) => Ok(x),
                 _ => Err(Messaged::new($message, Simple::new(Some(Maybe::Val(x)), s))),
+            }
+        });
+    };
+
+    ($var: ident, $parsing: ty, $ident: ident => $body: expr, $message: literal) => {
+        let $var = any().try_map(|x: TokenTree, s: SimpleSpan| {
+            let parsed = syn::parse2::<$parsing>(x.to_token_stream());
+            match parsed {
+                Ok($ident) => $body,
+                Err(_) => Err(Messaged::new($message, Simple::new(Some(Maybe::Val(x)), s))),
             }
         });
     };
@@ -121,26 +121,6 @@ impl<'src, L> LabelError<'src, Stream<IntoIter>, L> for Messaged<'src> {
     }
 }
 
-fn one_of_parsers<Output>(
-    parsers: Vec<Box<dyn Parser<'static, Stream<IntoIter>, Output, extra::Err<Messaged<'static>>>>>,
-) -> impl Parser<'static, Stream<IntoIter>, Output, extra::Err<Messaged<'static>>> {
-    custom(move |input| {
-        let mut last: Option<Messaged<'static>> = None;
-        for item in &parsers {
-            let checkpoint = input.save();
-            let checked = input.parse(item.as_ref());
-            match checked {
-                Ok(result) => return Ok(result),
-                Err(err) => {
-                    last = Some(err);
-                    input.rewind(checkpoint);
-                }
-            }
-        }
-        Err(last.unwrap())
-    })
-}
-
 fn parser() -> impl Parser<'static, Stream<IntoIter>, QueryDef, extra::Err<Messaged<'static>>> {
     define_parser!(ident, Ident, p => Ok(p), "expected identifier");
     define_parser!(ty, Type, p => Ok(p), "expected type");
@@ -153,6 +133,7 @@ fn parser() -> impl Parser<'static, Stream<IntoIter>, QueryDef, extra::Err<Messa
     define_parser!(dot, ., "expected '.' symbol");
     define_parser!(comma, ,, "expected ',' symbol");
     define_parser!(eq, =, "expected '=' symbol");
+    // define_parser!(lt, <, "expected '<' symbol");
     define_parser!(gt, >, "expected '>' symbol");
     define_parser!(at, @, "expected '@' symbol");
     let arrow = eq.then(gt);
@@ -163,40 +144,61 @@ fn parser() -> impl Parser<'static, Stream<IntoIter>, QueryDef, extra::Err<Messa
         .then(ident)
         .map(|(alias, field)| FieldReferenceClause { alias, field });
 
-    let primary_expression = one_of_parsers::<ExpressionClause>(vec![
-        Box::new(string_lit.map(|x| {
+    let primary_expression = string_lit
+        .map(|x| {
             ExpressionClause::Primary(PrimaryExpressionClause::String(StringClause { value: x }))
-        })),
-        Box::new(int_lit.map(|x| {
+        })
+        .or(int_lit.map(|x| {
             ExpressionClause::Primary(PrimaryExpressionClause::Integer(IntegerClause { value: x }))
-        })),
-        Box::new(
-            field_reference_clause
-                .map(|x| ExpressionClause::Primary(PrimaryExpressionClause::FieldReference(x))),
-        ),
-    ]);
-    let expression_clause = primary_expression.pratt((
-        define_infix!(left(1), eq, EqOperatorClause),
-        define_infix!(left(2), gt, GtOperatorClause),
-        infix(
-            left(8),
-            custom_operator_clause,
-            |l: ExpressionClause, (_, custom_ty), r: ExpressionClause, _| {
-                ExpressionClause::BinaryOperator(BinaryOperatorClause {
-                    left: Box::new(l),
-                    right: Box::new(r),
-                    operator: quote! {#custom_ty},
-                    custom_ty: Some(custom_ty),
+        }))
+        .or(field_reference_clause
+            .map(|x| ExpressionClause::Primary(PrimaryExpressionClause::FieldReference(x))))
+        .map(|x| ExpressionClause::Primary(PrimaryExpressionClause::Expression(Box::new(x))));
+
+    let parens = custom(|input| {
+        let before = input.cursor();
+        if let Some(next) = input.next() {
+            match next {
+                TokenTree::Group(group) if matches!(group.delimiter(), Delimiter::Parenthesis) => {
+                    Ok(Stream::from_iter(group.stream().into_iter()))
+                }
+                _ => Err(Messaged::new(
+                    "expression must be in parens",
+                    Simple::new(Some(Maybe::Val(next)), input.span_since(&before)),
+                )),
+            }
+        } else {
+            Err(Messaged::new(
+                "not found next tokens",
+                Simple::new(None, input.span_since(&before)),
+            ))
+        }
+    });
+
+    let expression_clause = recursive(|rec| {
+        let atom = primary_expression.or(rec.nested_in(parens));
+        atom.pratt((
+            define_infix!(left(1), eq, EqOperatorClause),
+            infix(
+                left(8),
+                custom_operator_clause,
+                |l: ExpressionClause, (_, custom_ty), r: ExpressionClause, _| {
+                    ExpressionClause::BinaryOperator(BinaryOperatorClause {
+                        left: Box::new(l),
+                        right: Box::new(r),
+                        operator: quote! {#custom_ty},
+                        custom_ty: Some(custom_ty),
+                    })
+                },
+            ),
+            prefix(0, not_keyword, |_, r: ExpressionClause, _| {
+                ExpressionClause::UnaryPrefixOperator(UnaryPrefixOperatorClause {
+                    operator: quote! {NotOperatorClause},
+                    value: Box::new(r),
                 })
-            },
-        ),
-        prefix(0, not_keyword, |_, r: ExpressionClause, _| {
-            ExpressionClause::UnaryPrefixOperator(UnaryPrefixOperatorClause {
-                operator: quote! {NotOperatorClause},
-                value: Box::new(r),
-            })
-        }),
-    ));
+            }),
+        ))
+    });
 
     let projection_clause = expression_clause
         .then_ignore(as_keyword.clone())
