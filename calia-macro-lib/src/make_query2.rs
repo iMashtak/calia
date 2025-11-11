@@ -1,25 +1,86 @@
-use std::fmt::Display;
-
 use chumsky::{
-    DefaultExpected,
-    error::{Error, RichReason},
+    error::Error,
     input::Stream,
     label::LabelError,
+    pratt::{infix, left, prefix},
     prelude::*,
     util::Maybe,
 };
 use indexmap::IndexMap;
 use proc_macro2::{Span, TokenStream, TokenTree, token_stream::IntoIter};
 use quote::{ToTokens, quote};
-use syn::Type;
+use syn::{Ident, Lit, Token, Type};
 
 use crate::{
     CgpSqlContext, ToCgpSql,
     expressions::{
-        BindingClause, BindingsClause, ExpressionClause, FieldReferenceClause, FromClause,
-        PrimaryExpressionClause, ProjectionClause, SelectClause, TableReferenceClause,
+        BinaryOperatorClause, BindingClause, BindingsClause, ExpressionClause,
+        FieldReferenceClause, FromClause, IntegerClause, PrimaryExpressionClause, ProjectionClause,
+        SelectClause, StringClause, TableReferenceClause, UnaryPrefixOperatorClause,
     },
 };
+
+macro_rules! define_parser {
+    ($var: ident, $parsing: ty, $ident: ident => $body: expr, $message: literal) => {
+        let $var = any().try_map(|x: TokenTree, s: SimpleSpan| {
+            let parsed = syn::parse2::<$parsing>(x.to_token_stream());
+            match parsed {
+                Ok($ident) => $body,
+                Err(_) => Err(Messaged::new($message, Simple::new(Some(Maybe::Val(x)), s))),
+            }
+        });
+    };
+
+    ($var: ident, $keyword: literal, $message: literal) => {
+        let $var = any().try_map(|x: TokenTree, s: SimpleSpan| {
+            let parsed = syn::parse2::<Ident>(x.to_token_stream());
+            match parsed {
+                Ok(p) if p.to_string() == $keyword => Ok(x),
+                _ => Err(Messaged::new($message, Simple::new(Some(Maybe::Val(x)), s))),
+            }
+        });
+    };
+
+    ($var: ident, $keyword: tt, $message: literal) => {
+        let $var = any().try_map(|x: TokenTree, s: SimpleSpan| {
+            let parsed = syn::parse2::<Token![$keyword]>(x.to_token_stream());
+            match parsed {
+                Ok(_) => Ok(x),
+                _ => Err(Messaged::new($message, Simple::new(Some(Maybe::Val(x)), s))),
+            }
+        });
+    };
+
+    ($var: ident, $parsing: ty, $pattern: pat => $body: expr, $message: literal) => {
+        let $var = any().try_map(|x: TokenTree, s: SimpleSpan| {
+            let parsed = syn::parse2::<$parsing>(x.to_token_stream());
+            match parsed {
+                Ok(parsed) => match parsed {
+                    $pattern => $body,
+                    _ => Err(Messaged::new($message, Simple::new(Some(Maybe::Val(x)), s))),
+                },
+                Err(_) => Err(Messaged::new($message, Simple::new(Some(Maybe::Val(x)), s))),
+            }
+        });
+    };
+}
+
+macro_rules! define_infix {
+    ($assoc: expr, $op: ident, $clause: ty) => {
+        infix(
+            $assoc,
+            $op,
+            |l: ExpressionClause, _, r: ExpressionClause, _| {
+                ExpressionClause::BinaryOperator(BinaryOperatorClause {
+                    left: Box::new(l),
+                    right: Box::new(r),
+                    operator: quote! {$clause},
+                    custom_ty: None,
+                })
+            },
+        )
+    };
+}
 
 struct QueryDef {
     assign: Type,
@@ -28,9 +89,6 @@ struct QueryDef {
 
 enum QueryClause {
     Select(SelectClause),
-    Update(),
-    Insert(),
-    Delete(),
 }
 
 #[derive(Debug)]
@@ -63,35 +121,84 @@ impl<'src, L> LabelError<'src, Stream<IntoIter>, L> for Messaged<'src> {
     }
 }
 
-fn parser<'src>() -> impl Parser<'src, Stream<IntoIter>, QueryDef, extra::Err<Messaged<'src>>> {
-    let ident = any().try_map(|x: TokenTree, s: SimpleSpan| match &x {
-        TokenTree::Ident(i) => Ok(i.clone()),
-        _ => Err(Messaged::new("expected identifier", Simple::new(Some(Maybe::Val(x)), s))),
-    });
-    let comma = select! {
-        TokenTree::Punct(x) => x.as_char() == ','
-    }
-    .filter(|x| *x);
-    let dot = select! {
-        TokenTree::Punct(x) => x.as_char() == '.'
-    }
-    .filter(|x| *x);
-    let select_keyword = select! {
-        TokenTree::Ident(x) => x.to_string() == "select"
-    }
-    .filter(|x| *x);
-    let from_keyword = select! {
-        TokenTree::Ident(x) => x.to_string() == "from"
-    }
-    .filter(|x| *x);
-    let as_keyword = any().try_map(|x: TokenTree, s: SimpleSpan| match &x {
-        TokenTree::Ident(i) if i.to_string() == "as" => Ok(x),
-        _ => Err(Messaged::new("expected 'as' keyword", Simple::new(Some(Maybe::Val(x)), s))),
-    });
+fn one_of_parsers<Output>(
+    parsers: Vec<Box<dyn Parser<'static, Stream<IntoIter>, Output, extra::Err<Messaged<'static>>>>>,
+) -> impl Parser<'static, Stream<IntoIter>, Output, extra::Err<Messaged<'static>>> {
+    custom(move |input| {
+        let mut last: Option<Messaged<'static>> = None;
+        for item in &parsers {
+            let checkpoint = input.save();
+            let checked = input.parse(item.as_ref());
+            match checked {
+                Ok(result) => return Ok(result),
+                Err(err) => {
+                    last = Some(err);
+                    input.rewind(checkpoint);
+                }
+            }
+        }
+        Err(last.unwrap())
+    })
+}
 
-    let projection_clause = ident
+fn parser() -> impl Parser<'static, Stream<IntoIter>, QueryDef, extra::Err<Messaged<'static>>> {
+    define_parser!(ident, Ident, p => Ok(p), "expected identifier");
+    define_parser!(ty, Type, p => Ok(p), "expected type");
+    define_parser!(string_lit, Lit, Lit::Str(p) => Ok(p), "expected string");
+    define_parser!(int_lit, Lit, Lit::Int(p) => Ok(p), "expected integer");
+    define_parser!(select_keyword, "select", "expected 'select' keyword");
+    define_parser!(from_keyword, "from", "expected 'from' keyword");
+    define_parser!(not_keyword, "not", "expected 'not' keyword");
+    define_parser!(as_keyword, as, "expected 'as' keyword");
+    define_parser!(dot, ., "expected '.' symbol");
+    define_parser!(comma, ,, "expected ',' symbol");
+    define_parser!(eq, =, "expected '=' symbol");
+    define_parser!(gt, >, "expected '>' symbol");
+    define_parser!(at, @, "expected '@' symbol");
+    let arrow = eq.then(gt);
+    let custom_operator_clause = at.then(ty);
+
+    let field_reference_clause = ident
         .then_ignore(dot)
         .then(ident)
+        .map(|(alias, field)| FieldReferenceClause { alias, field });
+
+    let primary_expression = one_of_parsers::<ExpressionClause>(vec![
+        Box::new(string_lit.map(|x| {
+            ExpressionClause::Primary(PrimaryExpressionClause::String(StringClause { value: x }))
+        })),
+        Box::new(int_lit.map(|x| {
+            ExpressionClause::Primary(PrimaryExpressionClause::Integer(IntegerClause { value: x }))
+        })),
+        Box::new(
+            field_reference_clause
+                .map(|x| ExpressionClause::Primary(PrimaryExpressionClause::FieldReference(x))),
+        ),
+    ]);
+    let expression_clause = primary_expression.pratt((
+        define_infix!(left(1), eq, EqOperatorClause),
+        define_infix!(left(2), gt, GtOperatorClause),
+        infix(
+            left(8),
+            custom_operator_clause,
+            |l: ExpressionClause, (_, custom_ty), r: ExpressionClause, _| {
+                ExpressionClause::BinaryOperator(BinaryOperatorClause {
+                    left: Box::new(l),
+                    right: Box::new(r),
+                    operator: quote! {#custom_ty},
+                    custom_ty: Some(custom_ty),
+                })
+            },
+        ),
+        prefix(0, not_keyword, |_, r: ExpressionClause, _| {
+            ExpressionClause::UnaryPrefixOperator(UnaryPrefixOperatorClause {
+                operator: quote! {NotOperatorClause},
+                value: Box::new(r),
+            })
+        }),
+    ));
+
+    let projection_clause = expression_clause
         .then_ignore(as_keyword.clone())
         .then(ident)
         .separated_by(comma)
@@ -100,22 +207,14 @@ fn parser<'src>() -> impl Parser<'src, Stream<IntoIter>, QueryDef, extra::Err<Me
         .map(|xs| {
             let bindings = xs
                 .into_iter()
-                .map(|((table, column), alias)| BindingClause {
-                    expression: ExpressionClause::Primary(PrimaryExpressionClause::FieldReference(
-                        FieldReferenceClause {
-                            alias: table,
-                            field: column,
-                        },
-                    )),
-                    alias,
-                })
+                .map(|(expression, alias)| BindingClause { expression, alias })
                 .collect::<Vec<_>>();
             ProjectionClause {
                 bindings: BindingsClause { values: bindings },
             }
         });
 
-    let from_clause = ident
+    let from_clause = ty
         .then_ignore(as_keyword)
         .then(ident)
         .separated_by(comma)
@@ -126,9 +225,7 @@ fn parser<'src>() -> impl Parser<'src, Stream<IntoIter>, QueryDef, extra::Err<Me
                 .into_iter()
                 .map(|(table, alias)| BindingClause {
                     expression: ExpressionClause::Primary(PrimaryExpressionClause::TableReference(
-                        TableReferenceClause {
-                            ty: Type::Verbatim(table.to_token_stream()),
-                        },
+                        TableReferenceClause { ty: table },
                     )),
                     alias,
                 })
@@ -149,15 +246,7 @@ fn parser<'src>() -> impl Parser<'src, Stream<IntoIter>, QueryDef, extra::Err<Me
             where_clause: None,
         });
 
-    let assign = any()
-        .filter(|x: &TokenTree| matches!(x, TokenTree::Ident(_)))
-        .map(|x: TokenTree| match x {
-            TokenTree::Ident(x) => Type::Verbatim(x.to_token_stream()),
-            _ => unreachable!(),
-        });
-
-    assign
-        .then_ignore(comma)
+    ty.then_ignore(arrow)
         .then(clause)
         .map(|(assign, clause)| QueryDef {
             assign,
@@ -169,7 +258,6 @@ impl ToCgpSql for QueryClause {
     fn to_cgp_sql(&self, context: &mut CgpSqlContext) -> TokenStream {
         match self {
             Self::Select(clause) => clause.to_cgp_sql(context),
-            _ => todo!(),
         }
     }
 }

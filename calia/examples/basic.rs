@@ -30,8 +30,8 @@ query! {SelectTemplate,
 }
 
 query2! {
-    SelectTemplateX, 
-    select table.field as alias
+    SelectTemplateX => 
+    select table.id as alias, 4 = not not 2 @Op not 3 as str
     from ScopeTable as table
 }
 
@@ -47,5 +47,8 @@ fn main() {
     println!("{}", result);
 
     let result = build!(use dialect for select in SelectTemplate<SampleExpression<EqOperatorClause>, AndOperatorClause>);
+    println!("{}", result);
+
+    let result = build!(use dialect for select in SelectTemplateX<AndOperatorClause>);
     println!("{}", result);
 }
